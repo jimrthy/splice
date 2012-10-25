@@ -13,7 +13,7 @@
 
 from __future__ import with_statement
 
-import sys, getopt, logging, os
+import sys, getopt, os
 import hashlib
 logging.basicConfig(level=logging.DEBUG)
 
@@ -21,11 +21,10 @@ logging.basicConfig(level=logging.DEBUG)
 class VersionError(IOError):
   pass
 
-class Program:
+class Splicer:
   # FIXME: Really should have two seperate classes for merging and splitting
   # instead of handling it this way
-  def __init__(self, argv):
-    self.argv = argv
+  def __init__(self):
 
     # Just pick a default
     self._mode = "split"
@@ -46,55 +45,17 @@ class Program:
 
     # Seems like a safe default. Play with it
     # Works great for small files. Not so much for big ones
-    #self._bufferSize = 1024
-    self._bufferSize = 1048576
+    self._bufferSize = 1
     
     # Start with a default that kind of makes sense for piping from STDIN
     self.__source_size = sys.maxint
 
-    self.logger = logging.getLogger("splice.Program")
+    self.logger = logging.getLogger("splice.Splicer")
 
     self._working_directory = '.'
 
-  def main(self):
-    try:
-      self.logger.debug("Checking options")
-      opts, args = getopt.getopt( self.argv, "hrsmf:vb:d:", 
-                                  ["help", "restart", "split", 
-      "merge","file=", "version", "buffer=", 'directory='])
-    except getopt.GetoptError:
-      print "Option error"
-      print self.usage()
-      sys.exit(2)
-    else:
-      self.logger.debug("Manipulating options")
-      for opt, arg in opts:
-        if opt in("-h", "--help"):
-          print self.usage()
-          sys.exit()
-        elif opt in ("-m", "--merge"):
-          self._mode = "merge"
-          self.logger.debug("Merging")
-        elif opt in ("-r", "--restart"):
-          self._restartable = True
-        elif opt in ("-f", "--file"):
-          self._sourceFileName = arg
-        elif opt in ("-v", "--version"):
-          print self._version
-          sys.exit()
-        elif opt in ("-b", "--buffer"):
-          self._bufferSize = int(arg)
-        elif opt in ("-d", "--directory"):
-          self._working_directory = arg
-      # Would be nice to loop through args and split them 1 at a time, creating
-      # subdirectories as appropriate. Do that later, when I have time
-      # (or merging multiple directories, of course)
-
-      self.logger.debug("Operating")
-      self.Operate()
-      self.logger.debug("Done")
-
   def Operate(self):
+    ''' Effectively, this is main() '''
     if self._mode == "merge":
       self._Merge()
     elif self._mode == "split":
@@ -109,7 +70,36 @@ class Program:
     else:
       raise NotImplementedError("Unknown mode: " + str(self._mode))
 
+  #########################################################
+  # Some more or less useful getters/setters boilerplate
+  #########################################################
+
+  def SetMergeMode(self):
+    self._mode = "merge"
+
+  def SetRepairSplice(self, mode):
+    self._restartable = mode
+
+  def SetSourceFileName(self, name):
+    self._sourceFileName = name
+
+  def Version(self):
+    return self._version
+
+  def BufferSize(self, size=None):
+    if size is not None:
+      self._bufferSize = int(size)
+
+    return self._bufferSize
+
+  def WorkingDirectory(self, pwd=None):
+    if pwd is not None:
+      self._working_directory = pwd
+
+    return self._working_directory
+
   def _Merge(self):
+    ''' Restore a splice to a single file '''
     # Suppose I could pipe the details from STDIN, but it just doesn't seem to
     # make any sense.  But what about sending them to STDOUT?
     if not self._sourceFileName:
@@ -143,7 +133,9 @@ class Program:
         # size they like.
         # That's really for future improvements, though. All 0.0.1 chunks
         # were hard-coded to be 1024 bytes long
-        self._bufferSize = 1024
+        # FIXME: That isn't true. It had a -b command line argument, even
+        # if I don't ever remember using it
+        self._bufferSize = 1024;
 
         digest = hashlib.md5()
       elif version == '0.0.2':
@@ -152,9 +144,11 @@ class Program:
       else:
         raise VersionError("Unknown version")
 
-    # *really* tempting to just use magic strings for version numbers
+    # *really* tempting to just use magic strings everywhere for version numbers
+    # Are they really any less confusing than trying to deal with a variable?
+    # Would named constants really gain me anything in this case?
     if version == self._version or version == '0.0.1':
-      self.logger.debug("Have a version '" + version + "' split")
+      self.logger.debug("Have a version '" + version + "' splice")
       # has to be a built-in to just glob this
 
       # discard the ".details"--really should make the UI simpler. Just go
@@ -163,7 +157,7 @@ class Program:
       source_root_name = self._sourceFileName[:-8]
 
       # Cheese-ball work-around for windows:
-      if source_root_name[0:2] == ".\\":
+      if source_root_name[:2] == ".\\":
         source_root_name = source_root_name[2:]
 
       self.logger.debug("Combining into a file named '" + source_root_name + "'")
@@ -348,6 +342,10 @@ class Program:
       if not block:
         break
 
+    finally:
+      # And should it really be handled by another, smaller file?
+      raise NotImplementedError("What do I want to do here?")
+
   def _RestartableSplit(self, error_handler):
     source = self.__PickSourceFile()
     destination_directory = self.__PickDestinationDirectory()
@@ -511,16 +509,6 @@ class Program:
       # choke and die too
       self.__SaveDetails(count, digest, destination_directory)
 
-  def usage(self):
-    instructions = """./splice.py [-h -m -s -r -v] [-d directory] [-f file]
--h: print this help message
--m: switch to merge mode
--r: allow splitting to be incremental (i.e. if errors happen the first time around)
--v: print version information
--d directory: should specify where to find spliced files to merge. Doesn't seem to work
--f file: operate on file (STDIN by default...although that probably doesn't work)"""
-    return instructions
-
   def dispose(self):
     # Just a sanity check, really
     try:
@@ -530,15 +518,6 @@ class Program:
       # they start biting me
       pass
 
-logging.debug("Hello?")
 if __name__ == '__main__':
-  program = Program(sys.argv[1:])
-  try:
-    logging.debug("Calling main")
-    program.main()
-  finally:
-    logging.debug("Calling dispose")
-    program.dispose()
-
-  logging.debug("Exiting")
-logging.trace("Good-bye")
+  logging.error "Use some sort of UI layer, such as Program or the REPL"
+  throw NotImplementedError("Not really meant for direct interactivity")
