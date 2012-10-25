@@ -368,18 +368,22 @@ class Splicer:
                                                           count)
         
         if not os.path.exists(destination_path):
-          if self._repairing:
-              if not finished:
-                  # Honestly, this is just annoying and should go away
-                  msg = "Missing file # %d. Try to replace?" % (count,)
-                  s = raw_input(msg)
-                  if s.strip()[0].lower() != 'y':
-                      # For whatever reason, the user has chosen to skip this piece
-                      count += 1
-                      continue
-              else:
-                  # This is what we expect to see
-                  break
+            if finished:
+                # This is what we expect to see
+                # (finished, with no "next" file to deal with)
+                # Really should check that size match source's EOF.
+                # Maybe in a future version
+                break
+            if self._repairing:
+                # it's tempting to do some prompting here. Maybe this
+                # is a sector we're willing to concede is just bad and
+                # skip, while we'd like to try another sector that failed
+                # during the last run further down the line.
+                # This is what I was trying initially, but it was annoying.
+
+                # OTOH, this is pretty much the perfect opportunity to switch
+                # into a recursive mode, trying to recover smaller chunks.
+                raise NotImplementedError("That seems to be next on the agenda")
           
           try:
             # There are really two very different standpoints from a performance
