@@ -19,6 +19,11 @@ import myexceptions
 
 logging.basicConfig(level=logging.DEBUG)
 
+# Set this next to False unless you want lots of weird things happening.
+# Nowhere near as efficient as C-preprocessor, but (yet again), this isn't
+# a CPU-bound process
+__DEBUG = True
+
 class Splicer:
     # FIXME: Really should have two seperate classes for merging and splitting
     # instead of handling it this way
@@ -383,6 +388,69 @@ class Splicer:
             # Is there anything that needs to happen here?
             pass
 
+    def __ReadBlock(self, source, readSize):
+        return source.read(readSize)
+
+    def __PossiblyThrowRandomErrorIfDebugging(self):
+        if __DEBUG:
+            # FIXME: Debug only
+            # Except that it seems likely it's needed again
+            percentage = random.randrange(0, 100)
+            if percentage < 15:
+                raise IOError("Random test simulating read failure")
+
+    def __RecursiveRepairBlock(self, source, initial_offset, chunkSize, chunkCount):
+        result = []
+        source.seek(initial_offset)
+
+        i = 0
+        while i < chunkCount:
+            try:
+                self.__PossiblyThrowRandomErrorIfDebugging()
+                buffer = self.__ReadBlock(source, chunkSize)
+                result += buffer
+            except IOError:
+                # Recurse in a smaller chunks
+                if chunkSize == 1:
+                    # Just give up. Though there are probably better defaults to 
+                    # depict flawed sectors
+                    self.__logger.error("Byte %d within the source file is not readable")
+                    result.append(0)
+                else:
+                    divisor = 0
+
+                    if chunkSize > 10:
+                        divisor = 10
+                    else:
+                        divisor = 2
+
+                    # Get the first x sub-chunks:
+                    sub_chunk_size = chunkSize / divisor
+                    offset = initial_offset + chunkSize * i
+                    result += self.__RecursiveRepairBlock(source, offset, sub_chunk_size, 2)
+
+                    remainder = chunkSize % divisor
+                    if remainder != 0:
+                        # and the last sub-chunk:
+                        final_offset = offset + (sub_chunk_size*divisor)
+                        result += self.__RecursiveRepairBlock(source, final_offset, remainder, 1)
+                        
+            i += 1
+
+        return result
+    
+    # Honestly, this deserves its own class
+    def __RepairBlock(self, source, count):
+        ''' Entry point for repairing one single block. Returns the block as best it can be repaired '''
+        # Can't start out this way. Don't actually know where we are in the file
+        #offset = source.tell()
+        initial_offset = self._bufferSize * count
+        result = self.__RecursiveRepairBlock(source, initial_offset, self._bufferSize/10, 10)
+
+        source.seek(initial_offset + self._bufferSize)
+
+        return result
+
     def __ActualSplitter(self):
         source = self.__PickSourceFile()
         destination_directory = self.__PickDestinationDirectory()
@@ -419,10 +487,20 @@ class Splicer:
                         
                         # OTOH, this is pretty much the perfect opportunity to switch
                         # into a recursive mode, trying to recover smaller chunks.
-                        raise NotImplementedError("That seems to be next on the agenda")
+
+                        # Should probably enable this option for non-repairing as well.
+                        # Or something along these lines, anyway
+                        block = self.__RepairBlock(source, count)
+
+                        msg = "Is there enough in there to be worth trying to save?"
+                        commit = self.__ui.PromptForYorN(msg)
+                        if not commit:
+                            # Skip this block
+                            count += 1
+                            continue
             
                     else:
-                        # Standard path...not particularly worried about I/O failure
+                        # Standard logic...not particularly worried about I/O failure
                         try:
                             # There are really two very different standpoints from a performance
                             # standpoint. The first time through, there won't be any pre-existing
@@ -435,9 +513,9 @@ class Splicer:
                             # When the seek actually happens is the difference
                             # between the repairing and standard versions. There's no particular
                             # reason for the standard not to build as much of the broken splice
-                            # as possible
+                            # as possible                            
 
-                            block = source.read(self._bufferSize)
+                            block = self.__ReadBlock(source, self._bufferSize)
                             if not block:
                                 # EOF. We're done
                                 break
@@ -452,12 +530,7 @@ class Splicer:
                                 # chunk)
                                 assert False, "Last destination file has wrong chunk size"
 
-                            '''
-                            # FIXME: Debug only
-                            # Except that it seems likely it's needed again
-                            percentage = random.randrange(0, 100)
-                            if percentage < 15:
-                            raise IOError("Random test simulating read failure") '''
+                            self.__PossiblyThrowRandomErrorIfDebugging()
 
                         except IOError, e:
                             msg = "Error reading block # %d (%s). Keep trying?\n" % (count, str(e),)
@@ -487,6 +560,8 @@ class Splicer:
                         destination.write(block)
 
                 else: # already wrote this chunk
+                    # Honestly, this is another special-case. Don't want to waste time on this
+                    # if I'm just trying to repair existing chunks
                     # Set this to something reasonable
                     bytes = self._bufferSize
 
