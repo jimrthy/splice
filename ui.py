@@ -17,3 +17,11 @@ class UI:
     def UpdateProgress(self):
         msg = "# %dK, " % (self.__current_kilo,)
         sys.stdout.write (msg)
+
+class DoesNothing:
+    ''' Really just for testing '''
+    def PromptForYorN(self, msg):
+        return True
+
+    def UpdateProgress(self):
+        pass
