@@ -4,6 +4,7 @@
 
 import getopt, logging, sys
 import splice
+import ui
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -13,7 +14,8 @@ class Program:
 
         self.__logger = logging.getLogger("splice.Program")
 
-        self.__splicer = splice.Splicer()
+        interface = ui.UI()
+        self.__splicer = splice.Splicer(interface)
 
     def main(self):
         try:
