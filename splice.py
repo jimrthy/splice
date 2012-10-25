@@ -9,7 +9,7 @@
 # python ./splice.py -r -f /usr/bin/whatever.zip
 # Put the pieces back together
 # (actually, I think this sample may be horrible misleading)
-# ./splice.py -m -d zip.split -f zip.details
+# ./splice.py -m -d whatever.zip.split -f whatever.zip.details
 
 from __future__ import with_statement
 
@@ -135,7 +135,7 @@ class Splicer:
         digest = hashlib.md5()
       elif version == '0.0.2':
         self._bufferSize = int(directory_file.readline().split(' ')[1].strip())
-        digest = hashlib.sha256sum()
+        digest = hashlib.sha256()
       else:
         raise myexceptions.VersionError("Unknown version")
 
@@ -370,18 +370,14 @@ class Splicer:
                                                           count)
         
         if not os.path.exists(destination_path):
-          # FIXME: refactor this particular pattern out to its own method
-          '''
-          assert False, "Obviously don't want this enabled on a first pass"
-          '''
           if self._repairing:
             msg = "Missing file # %d. Try to replace?" % (count,)
             s = raw_input(msg)
             if s[0].lower() != 'y':
+              # For whatever reason, the user has chosen to skip this piece
               count += 1
               continue
           
-          # Read another chunk from the source, just like with standard _Split
           try:
             # There are really two very different standpoints from a performance
             # standpoint. The first time through, there won't be any pre-existing
@@ -391,17 +387,11 @@ class Splicer:
             # On the second pass, we should already have the vast majority of chunks
             # (or we're *really* screwed), so it doesn't make any sense to seek
             # in source file *unless* there's a block to read
-            # This should really be controlled by a command-line
-            # parameter. Or something along those lines.
-            # For now, just use duct tape...comment out whichever assert/seek makes
-            # sense
+            # When the seek actually happens is the difference
+            # between the repairing and standard versions. There's no particular
+            # reason for the standard not to build as much of the broken splice
+            # as possible
 
-            # FIXME: Actually, when the seek happens should be the difference
-            # between the restartable and standard versions. There's no particular
-            # reason for the standard not to try to build the broken splice
-            '''
-            assert False, "Enable a seek depending on where it makes most sense"
-            '''
             source.seek(self._bufferSize * count)
 
             block = source.read(self._bufferSize)
@@ -427,7 +417,8 @@ class Splicer:
               # Technically, I should be keeping a running total of all
               # the chunk sizes
               # Worry about it if it ever becomes an issue
-              source.seek(count * self._bufferSize)
+              if not self._repairing:
+                  source.seek(count * self._bufferSize)
               continue
             else:
               break
@@ -437,9 +428,10 @@ class Splicer:
             destination.write(block)
 
         else: # already wrote this chunk
-          # Read the destination file.
+          # Set this to something reasonable
           bytes = self._bufferSize
 
+          # Read the destination file.
           with open(destination_path, "rb") as destination:
             block = destination.read(self._bufferSize)
             bytes = len(block)
@@ -454,7 +446,9 @@ class Splicer:
 
         count  += 1
         if (count % 1024) == 0:
-          sys.stdout.write ("#")
+            kilo = count / 1024
+            msg = "# %dK, " % (kilo,)
+            sys.stdout.write (msg)
 
     finally:
       # Don't necessarily want this to happen every time. It's worth
@@ -463,56 +457,7 @@ class Splicer:
 
       self.__CloseIfSafe(source)
 
-  def _Split(self):
-    raise myexceptions.ObsoleteMethod("Has gone away")
-
-    # FIXME: These either need to be turned into member variables or
-    # assigned as a tuple by a helper method, just to reduce duplicate
-    # code
-    source = self.__PickSourceFile()
-    destination_directory = self.__PickDestinationDirectory()
-
-    # Keep track of which chunk we're on
-    count = 0
-
-    # Track the checksum
-    digest = hashlib.sha256()
-
-    try:
-      self.__CreateDirectory(destination_directory)
-
-      while True:
-        #self.logger.info("Writing chunk # " + str(count))
-
-        block = source.read(self._bufferSize)
-        if not block:
-          break
-
-        # update the checksum
-        digest.update(block)
-
-        # output the chunk
-        destination_path = self.__PickDestinationFileName(destination_directory,
-                                                          count)
-
-        with open(destination_path, "wb") as destination:
-          destination.write(block)
-
-        # Remember to switch to the next file
-        count += 1
-
-        if (count % 1024) == 0:
-          print("#",)
-        
-    finally:
-      self.__CloseIfSafe(source)
-
-      # Save the details
-      # This could happen after closing source. But that could
-      # choke and die too
-      self.__SaveDetails(count, digest, destination_directory)
-
-  def dispose(self):
+  def Dispose(self):
     # Just a sanity check, really
     try:
       self._source.close()

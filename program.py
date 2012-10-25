@@ -71,8 +71,8 @@ class Program:
 -f file: operate on file (STDIN by default...although that probably doesn't work)"""
         return instructions
 
-    def dispose(self):
-        self.__splicer.dispose()
+    def Dispose(self):
+        self.__splicer.Dispose()
 
 if __name__ == '__main__':
   program = Program(sys.argv[1:])
@@ -81,7 +81,7 @@ if __name__ == '__main__':
     program.main()
   finally:
     logging.debug("Calling dispose")
-    program.dispose()
+    program.Dispose()
 
   logging.debug("Exiting")
 logging.info("Good-bye")
