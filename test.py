@@ -16,11 +16,6 @@ Ipsum Lorem Facto. Je ne parles pas Francais.
 Old McDonald had a farm. Really should be working with binary data, but Python's
 being obnoxious about that entire thing."""
 
-    def __init__(self):
-        # Probably better not to do this. Oh well
-        # Actually, don't.
-        #self.__ui = ui.DoesNothing()
-        pass
     ##############################################################
     # Tests
     ##############################################################
