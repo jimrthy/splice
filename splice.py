@@ -20,197 +20,221 @@ import myexceptions
 logging.basicConfig(level=logging.DEBUG)
 
 class Splicer:
-  # FIXME: Really should have two seperate classes for merging and splitting
-  # instead of handling it this way
-  def __init__(self):
+    # FIXME: Really should have two seperate classes for merging and splitting
+    # instead of handling it this way
+    def __init__(self, ui):
+        self.__ui = ui
 
-    # Just pick a default
-    self._mode = "split"
+        # Just pick a default
+        self._mode = "split"
 
-    # Since this is what we almost always want
-    self._repairing = False
+        # Since this is what we almost always want
+        self._repairing = False
 
-    # Try to play unix-nice
-    # can't do this when splitting.  No good way to tell what the output file
-    # name(s) should be.  Well, think about it
+        # Try to play unix-nice
+        # can't do this when splitting.  No good way to tell what the output file
+        # name(s) should be.  Well, think about it
 
-    #self._source = sys.stdin
-    self._sourceFileName = None
+        self._source = sys.stdin
+        self._sourceFileName = "STDIN"
 
-    self._version = "0.0.2"
+        self._version = "0.0.2"
 
-    # This pretty much forces the user to specify a size. It's tempting
-    # to set it to 0 or None and change it into a required option
-    self._bufferSize = 1
+        # This pretty much forces the user to specify a size. It's tempting
+        # to set it to 0 or None and change it into a required option
+        self._bufferSize = 1
     
-    # Start with a default that kind of makes sense for piping from STDIN
-    self.__source_size = sys.maxint
+        # Start with a default that kind of makes sense for piping from STDIN
+        self.__source_size = sys.maxint
 
-    self.logger = logging.getLogger("splice.Splicer")
+        self.logger = logging.getLogger("splice.Splicer")
+        # FIXME: Configure the logger to send its output to self.__ui
 
-    self._working_directory = '.'
+        self._working_directory = '.'
 
-  def Operate(self):
-    ''' Effectively, this is main() '''
-    if self._mode == "merge":
-      self._Merge()
-    elif self._mode == "split":
-      self.__ActualSplitter()
-
-    else:
-      raise NotImplementedError("Unknown mode: " + str(self._mode))
-
-  #########################################################
-  # Some more or less useful getters/setters boilerplate
-  #########################################################
-
-  def SetMergeMode(self):
-    self._mode = "merge"
-
-  def SetRepairSplice(self, mode):
-    self._repairing = mode
-
-  def SetSourceFileName(self, name):
-    self._sourceFileName = name
-
-  def Version(self):
-    return self._version
-
-  def BufferSize(self, size=None):
-    if size is not None:
-      self._bufferSize = int(size)
-
-    return self._bufferSize
-
-  def WorkingDirectory(self, pwd=None):
-    if pwd is not None:
-      self._working_directory = pwd
-
-    return self._working_directory
-
-  def _Merge(self):
-    ''' Restore a splice to a single file '''
-
-    # FIXME: Break this into multiple methods. Maybe even its own class
-
-    # Suppose I could pipe the details from STDIN, but it just doesn't seem to
-    # make any sense.  But what about sending them to STDOUT?
-    if not self._sourceFileName:
-      raise NotImplementedError("Look for a .details file in the pwd")
-
-    self.logger.debug("Pulling details out of the directory file '" + self._sourceFileName + "'")
-
-    # the files that might be interesting
-    list_of_file_names = os.listdir(self._working_directory)
-    #self.logger.debug("Considering " + str(list_of_file_names))
-
-    directory_file_name = os.path.join(self._working_directory, self._sourceFileName)
-    with open(directory_file_name, "r") as directory_file:
-      # FIXME: This really should be a YAML file
-      # Checksum:
-      # Version:
-      version = directory_file.readline().split(' ')[1].strip()
-
-      # Chunk Count:
-      chunk_count = int(directory_file.readline().split(' ')[2].strip())
-
-      # stash this for later
-      expected_checksum = directory_file.readline().split(' ')[1].strip()
-
-      # chunk size and hashing algorithm
-      digest = None
-
-      if version == '0.0.1':
-        # TODO: open a .chunk file and base this on that instead
-        # Better: just use a restartable buffer and let the chunks be any
-        # size they like.
-        # That's really for future improvements, though. All 0.0.1 chunks
-        # were hard-coded to be 1024 bytes long
-        # FIXME: That isn't true. It had a -b command line argument, even
-        # if I don't ever remember using it
-        self._bufferSize = 1024;
-
-        digest = hashlib.md5()
-      elif version == '0.0.2':
-        self._bufferSize = int(directory_file.readline().split(' ')[1].strip())
-        digest = hashlib.sha256()
-      else:
-        raise myexceptions.VersionError("Unknown version")
-
-    # *really* tempting to just use magic strings everywhere for version numbers
-    # Are they really any less confusing than trying to deal with a variable?
-    # Would named constants really gain me anything in this case?
-    if version == self._version or version == '0.0.1':
-      self.logger.debug("Have a version '" + version + "' splice")
-      # has to be a built-in to just glob this
-
-      # discard the ".details"--really should make the UI simpler. Just go
-      # into the folder, run splice.py -m, and it finds the .details file and
-      # merges everything.  Do that in the next version
-      source_root_name = self._sourceFileName[:-8]
-
-      # Cheese-ball work-around for windows:
-      if source_root_name[:2] == ".\\":
-        source_root_name = source_root_name[2:]
-
-      self.logger.debug("Combining into a file named '" + source_root_name + "'")
-
-      # Make sure all the chunks are there
-      count = 0
-      files_to_merge = []
-      for file_name in list_of_file_names:
-        #self.logger.debug("Maybe counting a file named '" + str(file_name) + "'")
-
-        name_pieces = file_name.split('.')
-        # ignore the '.###.chunk' part.  Do it this way so I can vary the
-        # length of the string that specifies the count
-        #self.logger.debug(str(name_pieces))
-        if name_pieces[-1] == 'chunk':
-          root_name = '.'.join(name_pieces[:-2])
-          if root_name == source_root_name:
-            files_to_merge.append(file_name)
-            count += 1
-          else:
-            self.logger.debug("Not part of this split")
+    def Operate(self):
+        ''' Effectively, this is main() '''
+        if self._mode == "merge":
+            self._Merge()
+        elif self._mode == "split":
+            self.__ActualSplitter()
         else:
-          self.logger.debug(file_name + " : Not a chunk")
+            raise NotImplementedError("Unknown mode: " + str(self._mode))
 
-      if count == chunk_count:
-        self.logger.debug("Merging " + str(count) + " chunks into '" + source_root_name + "'")
-        # OK, we can at least try to merge the pieces
-        files_to_merge.sort() # Seems reasonable to require them to be in alphabetical order
+    #########################################################
+    # Some more or less useful getters/setters boilerplate
+    #########################################################
 
-        # FIXME: Allow the user to specify a destination file? What about
-        # piping to STDOUT?
+    def SetMergeMode(self):
+        self._mode = "merge"
 
-        with open(source_root_name, "wb") as destination:
-          for file_name in files_to_merge:
-            file_path = os.path.join(self._working_directory, file_name)
-            #self.logger.info("# " + file_path)
-            with open(file_path, "rb") as source:
-              while True:
-                bytes = source.read()
-                if not bytes:
-                  break
-                digest.update(bytes)
-                destination.write(bytes)
-        actual_checksum = digest.hexdigest()
+    def SetRepairSplice(self, mode):
+        self._repairing = mode
 
-        if actual_checksum != expected_checksum:
-          self.logger.warning("Checksums don't match!")
+    def SetSourceFileName(self, name):
+        self._sourceFileName = name
+
+    def Version(self):
+        return self._version
+
+    def BufferSize(self, size=None):
+        if size is not None:
+            self._bufferSize = int(size)
+
+        return self._bufferSize
+
+    def WorkingDirectory(self, pwd=None):
+        if pwd is not None:
+            self._working_directory = pwd
+
+        return self._working_directory
+
+    ##################################################################################
+    # Merging
+    ##################################################################################
+
+    def __PickDigestAndBufferSize(self, version):
+        ''' An unfortunate leftover from the way I'm currently handling version details '''
+        # Returns the hashing style. Sets internal buffer size property
+        
+        # chunk size and hashing algorithm
+        # (one of those rare occasions when it needs to be declared...though this 
+        # implementation's broken)
+        digest = None
+
+        if version == '0.0.1':
+            # TODO: open a .chunk file and base this on that instead
+            # Better: just use a restartable buffer and let the chunks be any
+            # size they like.
+            # That's really for future improvements, though. All 0.0.1 chunks
+            # were hard-coded to be 1024 bytes long
+            # FIXME: That isn't true. It had a -b command line argument, even
+            # if I don't ever remember using it
+            self._bufferSize = 1024;
+                
+            digest = hashlib.md5()
+        elif version == '0.0.2':
+            self._bufferSize = int(directory_file.readline().split(' ')[1].strip())
+            digest = hashlib.sha256()
         else:
-          self.logger.debug("Merge succeeded (checksum: '" + actual_checksum + "')") 
-      else:
-        self.logger.error("Wrong chunk count. Expected %d. Have %d" % (chunk_count, count))
-    elif version == '0.0.1':
-      # This should really be easy to fix. The only real difference is
-      # that 0.0.1 used md5 for the checksum
-      # FIXME: That should already be fixed. So this branch should just
-      # disappear
-      self.logger.error("Currently incompatible with version 0.0.1 chunks")
-      raise myexceptions.VersionError("Currently backwards incompatible")
-    else:
-      raise myexceptions.VersionError("Not smart enough to deal with a version '" + version + "' split")
+            raise myexceptions.VersionError("Unknown version")
+
+        return digest
+
+    def __PickSourceRootName(self):
+        # There has to be a built-in to just glob this
+
+        # discard the ".details"--really should make the UI simpler. Just go
+        # into the folder, run splice.py -m, and it finds the .details file and
+        # merges everything.  TODO: do that soon
+        source_root_name = self._sourceFileName[:-8]
+
+        # Cheese-ball work-around for windows:
+        if source_root_name[:2] == ".\\":
+            source_root_name = source_root_name[2:]
+
+        self.logger.debug("Combining into a file named '" + source_root_name + "'")
+
+        return source_root_name
+
+    def __Chunks(self, list_of_file_names, source_root_name):
+        # Make sure all the chunks are there
+        count = 0
+        files_to_merge = []
+        for file_name in list_of_file_names:
+            #self.logger.debug("Maybe counting a file named '" + str(file_name) + "'")
+
+            name_pieces = file_name.split('.')
+            # ignore the '.###.chunk' part.  Do it this way so I can vary the
+            # length of the string that specifies the count
+            #self.logger.debug(str(name_pieces))
+            if name_pieces[-1] == 'chunk':
+                root_name = '.'.join(name_pieces[:-2])
+                if root_name == source_root_name:
+                    files_to_merge.append(file_name)
+                    count += 1
+                else:
+                    self.logger.debug("Not part of this split")
+            else:
+                self.logger.debug(file_name + " : Not a chunk")
+
+        return files_to_merge
+
+    # FIXME: Break this into smaller pieces
+    def _Merge(self):
+        ''' Restore a splice to a single file '''
+
+        # FIXME: Break this into multiple methods. Maybe even its own class
+
+        # Suppose I could pipe the details from STDIN, but it just doesn't seem to
+        # make any sense.  But what about sending them to STDOUT?
+        if not self._sourceFileName:
+            # No, this error message isn't very helpful
+            raise NotImplementedError("Implement looking for a .details file in the pwd")
+
+        self.logger.debug("Pulling details out of the directory file '" + self._sourceFileName + "'")
+
+        # the files that might be interesting
+        list_of_file_names = os.listdir(self._working_directory)
+
+        details_file_name = os.path.join(self._working_directory, self._sourceFileName)
+        with open(details_file_name, "r") as details_file:
+            # FIXME: This really should be a YAML file
+            # Version:
+            version = details_file.readline().split(' ')[1].strip()
+
+            # Chunk Count:
+            chunk_count = int(details_file.readline().split(' ')[2].strip())
+
+            # stash this for later
+            expected_checksum = details_file.readline().split(' ')[1].strip()
+
+        digest = self.__PickDigestAndBufferSize(version)
+
+        # *really* tempting to just use magic strings everywhere for version numbers
+        # Are they really any less confusing than trying to deal with a variable?
+        # Would named constants really gain me anything in this case?
+        # No. Much better to parse it and deal with major/minor versions as needed.
+        # Though I just realized that I've committed a fairly major sin by breaking
+        # the interface between 0.0.1 and 0.0.2. Oh, well. It isn't like anyone but
+        # me has ever seen this code yet
+        if version == self._version or version == '0.0.1':
+            self.logger.debug("Have a version '" + version + "' splice that I can handle")
+
+            source_root_name = self.__PickSourceRootName()
+
+            files_to_merge = self.__Chunks(list_of_file_names, source_root_name)
+            if len(files_to_merge) == chunk_count:
+                self.logger.debug("Merging " + str(count) + " chunks into '" + source_root_name + "'")
+                # OK, we can at least try to merge the pieces
+                files_to_merge.sort() # Seems reasonable to require them to be in alphabetical order
+
+                # FIXME: Allow the user to specify a destination file? What about
+                # piping to STDOUT?
+
+                with open(source_root_name, "wb") as destination:
+                    for file_name in files_to_merge:
+                        file_path = os.path.join(self._working_directory, file_name)
+                        #self.logger.info("# " + file_path)
+                        with open(file_path, "rb") as source:
+                            while True:
+                                bytes = source.read()
+                                if not bytes:
+                                    break
+                                digest.update(bytes)
+                                destination.write(bytes)
+                actual_checksum = digest.hexdigest()
+
+                if actual_checksum != expected_checksum:
+                    self.logger.warning("Checksums don't match!")
+                else:
+                    self.logger.debug("Merge succeeded (checksum: '" + actual_checksum + "')") 
+            else:
+                self.logger.error("Wrong chunk count. Expected %d. Have %d" % (chunk_count, count))
+
+  #################################################################33
+  # Splitting
+  #################################################################33
 
   def __PickSourceFile(self):
     ''' Caller is responsible for closing '''
@@ -331,21 +355,19 @@ class Splicer:
   def __TryToReadDifficultBlock(self, source, index):
     try:
       source.seek(self._bufferSize * count)
-
       
       block = source.read(self._bufferSize)
       if not block:
 #break
+        # Actually, this indicates EOF, so we're done.
         pass
 
-    finally:
+    except IOError:
       # And should it really be handled by another, smaller file?
       raise NotImplementedError("What do I want to do here?")
-
-  def _RestartableSplit(self):
-    # This is pretty much redundant and should probably go away.
-    # The error_handler is particularly obnoxious
-      raise ObsoleteMethod()
+    finally:
+      # Is there anything that needs to happen here?
+      pass
 
   def __ActualSplitter(self):
     source = self.__PickSourceFile()
@@ -384,46 +406,47 @@ class Splicer:
                 # OTOH, this is pretty much the perfect opportunity to switch
                 # into a recursive mode, trying to recover smaller chunks.
                 raise NotImplementedError("That seems to be next on the agenda")
-          
-          try:
-            # There are really two very different standpoints from a performance
-            # standpoint. The first time through, there won't be any pre-existing
-            # destination files. In that case, it really doesn't make any sense
-            # to seek between reads.
-            # OTOH, hopefully almost all the pieces were read the first time through.
-            # On the second pass, we should already have the vast majority of chunks
-            # (or we're *really* screwed), so it doesn't make any sense to seek
-            # in source file *unless* there's a block to read
-            # When the seek actually happens is the difference
-            # between the repairing and standard versions. There's no particular
-            # reason for the standard not to build as much of the broken splice
-            # as possible
-
-            source.seek(self._bufferSize * count)
             
-            block = source.read(self._bufferSize)
-            if not block:
-              # EOF. We're done
-              break
-            if finished:
-              # This isn't pretty, but I'm in a hurry.
-              # Best bet is to just delete the file with the incorrect size
-              # and try running this agais
-              # (what this means is that a pre-existing destination file
-              # had an incorrect bufferSize, but it wasn't the final
-              # chunk)
-              assert False, "Last destination file has wrong chunk size"
+            try:
+                # There are really two very different standpoints from a performance
+                # standpoint. The first time through, there won't be any pre-existing
+                # destination files. In that case, it really doesn't make any sense
+                # to seek between reads.
+                # OTOH, hopefully almost all the pieces were read the first time through.
+                # On the second pass, we should already have the vast majority of chunks
+                # (or we're *really* screwed), so it doesn't make any sense to seek
+                # in source file *unless* there's a block to read
+                # When the seek actually happens is the difference
+                # between the repairing and standard versions. There's no particular
+                # reason for the standard not to build as much of the broken splice
+                # as possible
 
-            # FIXME: Debug only
-            percentage = random.randrange(0, 100)
-            if percentage < 15:
-                raise IOError("Random test simulating read failure")
+                source.seek(self._bufferSize * count)
+            
+                block = source.read(self._bufferSize)
+                if not block:
+                    # EOF. We're done
+                    break
+                if finished:
+                    # This isn't pretty, but I'm in a hurry.
+                    # Best bet is to just delete the file with the incorrect size
+                    # and try running this agais
+                    # (what this means is that a pre-existing destination file
+                    # had an incorrect bufferSize, but it wasn't the final
+                    # chunk)
+                    assert False, "Last destination file has wrong chunk size"
 
-          except IOError, e:
-              msg = "Error reading block # %d (%s). Keep trying?\n" % (count, str(e),)
-              response = raw_input(msg)
-              print
-              if response.strip()[0].lower() == 'y':
+                '''
+                # FIXME: Debug only
+                # Except that it seems likely it's needed again
+                percentage = random.randrange(0, 100)
+                if percentage < 15:
+                    raise IOError("Random test simulating read failure") '''
+
+            except IOError, e:
+                msg = "Error reading block # %d (%s). Keep trying?\n" % (count, str(e),)
+                response = ui.PromptForYorN(msg)
+                if response:
                   # Skip to the next block
                   count += 1
 
@@ -438,12 +461,12 @@ class Splicer:
                       # But, after an IOError, who knows where tell() is?
                       source.seek(count * self._bufferSize)
                   continue
-              else:
+                else:
                   break
 
-          # Save the chunk
-          with open(destination_path, "wb") as destination:
-            destination.write(block)
+            # Save the chunk
+            with open(destination_path, "wb") as destination:
+                destination.write(block)
 
         else: # already wrote this chunk
           # Set this to something reasonable
@@ -464,9 +487,7 @@ class Splicer:
 
         count  += 1
         if (count % 1024) == 0:
-            kilo = count / 1024
-            msg = "# %dK, " % (kilo,)
-            sys.stdout.write (msg)
+            self.__ui.UpdateProgress()
 
     finally:
       # Don't necessarily want this to happen every time. It's worth
