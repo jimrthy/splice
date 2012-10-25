@@ -49,7 +49,7 @@ class Program:
                     # and pass them into the Splicer one at a time. It probably
                     # shouldn't be handling the source file i/o anyway.
                     # Do that next
-                    self.__splicer.SetSourceFileName(arg)
+                    self.__splicer.SourceFileName(arg)
                     self.__logger.info("Splicing %s" % (arg,))
                 elif opt in ("-v", "--version"):
                     print self.__splicer.Version()
@@ -60,7 +60,9 @@ class Program:
                     self.__splicer.WorkingDirectory(arg)
 
             self.__logger.debug("Operating")
-            self.__splicer.Operate()
+            with open (self.__splicer.SourceFileName()) as src:
+                self.__splicer.Source(src)
+                self.__splicer.Operate()
             self.__logger.debug("Done")
 
     def usage(self):
@@ -74,16 +76,14 @@ class Program:
         return instructions
 
     def Dispose(self):
+        raise myexceptions.ObsoleteMethod("No longer doing anything")
         self.__splicer.Dispose()
 
+logging.info("Hello")
 if __name__ == '__main__':
   program = Program(sys.argv[1:])
-  try:
-    logging.debug("Calling main")
-    program.main()
-  finally:
-    logging.debug("Calling dispose")
-    program.Dispose()
 
-  logging.debug("Exiting")
+  logging.debug("Calling main")
+  program.main()
+
 logging.info("Good-bye")

@@ -22,10 +22,10 @@ logging.basicConfig(level=logging.DEBUG)
 # Set this next to False unless you want lots of weird things happening.
 # Nowhere near as efficient as C-preprocessor, but (yet again), this isn't
 # a CPU-bound process
-__DEBUG = True
+_DEBUG = False
 
 def SwitchToDebug(d = True):
-    __DEBUG = d
+    _DEBUG = d
 
 class Splicer:
     # FIXME: Really should have two seperate classes for merging and splitting
@@ -39,12 +39,7 @@ class Splicer:
         # Since this is what we almost always want
         self._repairing = False
 
-        # Try to play unix-nice
-        # can't do this when splitting.  No good way to tell what the output file
-        # name(s) should be.  Well, think about it
-
-        self._source = sys.stdin
-        self._sourceFileName = "STDIN"
+        self.ResetSource()
 
         self._version = "0.0.2"
 
@@ -52,9 +47,6 @@ class Splicer:
         # to set it to 0 or None and change it into a required option
         self._bufferSize = 1
     
-        # Start with a default that kind of makes sense for piping from STDIN
-        self.__source_size = sys.maxint
-
         self.logger = logging.getLogger("splice.Splicer")
         # FIXME: Configure the logger to send its output to self.__ui
 
@@ -79,9 +71,34 @@ class Splicer:
     def SetRepairSplice(self, mode):
         self._repairing = mode
 
-    def SetSourceFileName(self, name):
-        # FIXME: This should be both Getter and Setter
-        self._sourceFileName = name
+    def SourceFileName(self, name=None):
+        if name is not None:
+            self._sourceFileName = name
+
+        return self._sourceFileName
+
+    def ResetSource(self):
+        ''' Work-around to allow Source to work as both a Getter and Setter '''
+        # Try to play unix-nice
+        self.__source = sys.stdin
+        self._sourceFileName = "STDIN"
+        # Start with a default that kind of makes sense for piping from STDIN
+        self.__source_size = sys.maxint
+
+    def Source(self, src=None):
+        if src is not None:
+            try:
+                # This is *definitely* going to cause awkward things to happen if src isn't seekable
+                # Worry about that when it happens
+                src.seek(0, 2)
+                self.__source_size = src.tell()
+                src.seek(0, 0)
+            except AttributeError:
+                self.__logger.error("Currently only supporting seekable objects for splicing")
+                raise
+            self.__source = src
+
+        return self.__source
 
     def Version(self):
         return self._version
@@ -172,7 +189,7 @@ class Splicer:
 
         return files_to_merge
 
-    # FIXME: Break this into smaller pieces
+    # FIXME: Break this into smaller pieces (yes, still)
     def _Merge(self):
         ''' Restore a splice to a single file '''
 
@@ -239,6 +256,9 @@ class Splicer:
                     for file_name in files_to_merge:
                         file_path = os.path.join(self._working_directory, file_name)
                         #self.logger.info("# " + file_path)
+
+                        # Note the major distinction here between source and self._source (much
+                        # less self.__source). Much ugliness has entered this code!
                         with open(file_path, "rb") as source:
                             while True:
                                 bytes = source.read()
@@ -256,12 +276,14 @@ class Splicer:
             else:
                 self.logger.error("Wrong chunk count. Expected %d. Have %d" % (chunk_count, count))
 
-    #################################################################33
+    #################################################################
     # Splitting
-    #################################################################33
+    #################################################################
 
     def __PickSourceFile(self):
         ''' Caller is responsible for closing '''
+        raise myexceptions.ObsoleteMethod("Splicer should not be doing this")
+
         if not self._sourceFileName:
             self._sourceFileName = 'STDIN'
             source = sys.stdin
@@ -297,15 +319,21 @@ class Splicer:
             raise
         
     def __CloseIfSafe(self, source):
+        raise myexceptions.ObsoleteMethod("Let the caller deal with this...or not")
+
         if self._sourceFileName != 'STDIN':
             # Shouldn't hurt to call this on an object that's already closed
             source.close()
 
     def __PickChunkDigits(self, memo=[]):
         ''' How many digits do we need to account for all the chunks? '''
+        # Since there really isn't anything we can do with this that isn't
+        # obnoxious
+        if self.__source == sys.stdin:
+            return 1
 
+        # Note that memoizing this makes re-using a splicer much more problematic
         if not memo:
-            # Really should memoize this
             # Horrible way to do this
             chunk_count = self.__source_size / self._bufferSize
             if self.__source_size % self._bufferSize != 0:
@@ -398,7 +426,7 @@ class Splicer:
         return source.read(readSize)
 
     def __PossiblyThrowRandomErrorIfDebugging(self):
-        if __DEBUG:
+        if _DEBUG:
             # FIXME: Debug only
             # Except that it seems likely it's needed again
             percentage = random.randrange(0, 100)
@@ -458,7 +486,9 @@ class Splicer:
         return result
 
     def __ActualSplitter(self):
+        '''
         source = self.__PickSourceFile()
+        '''
         destination_directory = self.DestinationDirectory()
         count = 0
         digest = hashlib.sha256()
@@ -496,7 +526,7 @@ class Splicer:
 
                         # Should probably enable this option for non-repairing as well.
                         # Or something along these lines, anyway
-                        block = self.__RepairBlock(source, count)
+                        block = self.__RepairBlock(self.__source, count)
 
                         msg = "Is there enough in there to be worth trying to save?"
                         commit = self.__ui.PromptForYorN(msg)
@@ -521,7 +551,7 @@ class Splicer:
                             # reason for the standard not to build as much of the broken splice
                             # as possible                            
 
-                            block = self.__ReadBlock(source, self._bufferSize)
+                            block = self.__ReadBlock(self.__source, self._bufferSize)
                             if not block:
                                 # EOF. We're done
                                 break
@@ -556,7 +586,7 @@ class Splicer:
                                     # *Very* strong evidence that this method is *way* too long and complicated
                                     # Could probably seek to self._bufferSize, relative.
                                     # But, after an IOError, who knows where tell() is?
-                                    source.seek(count * self._bufferSize)
+                                    self.__source.seek(count * self._bufferSize)
                                 continue
                             else:
                                 break
@@ -580,7 +610,7 @@ class Splicer:
 
                     if not self._repairing:
                         # Again, the distinction between the two
-                        source.seek(bytes, 1)
+                        self.__source.seek(bytes, 1)
           
                 # update the checksum
                 digest.update(block)
@@ -594,11 +624,17 @@ class Splicer:
             # contemplating
             self.__SaveDetails(count, digest, destination_directory)
 
-            self.__CloseIfSafe(source)
+            # FIXME: Make this go away. It's only here currently to make the change
+            # more obvious in source control history
+            #self.__CloseIfSafe(self.__source)
 
     def Dispose(self):
+        # Especially with that whole "Just swallow exceptions without question" attitude
+        raise ObsoleteMethod("Caller needs to deal with this.")
+
         # Just a sanity check, really
         try:
+            # Eww...*this* smells!
             self._source.close()
         except:
             # All kinds of things could go wrong here. Maybe document them later, if

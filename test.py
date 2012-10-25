@@ -1,6 +1,6 @@
 #! /usr/bin/env/python
 
-import os, unittest
+import os, shutil, sys, unittest
 import io
 
 import splice, ui
@@ -28,34 +28,42 @@ being obnoxious about that entire thing."""
         ''' Can we run through the bare splicing process successfully? '''
         self.__splicer.Operate()
 
+    def test_SourceManipulation(self):
+        ''' Switch the source buffers around, just because we can '''
+        # I suppose that this should probably be multiple tests
+        buffer = self.__splicer.Source()
+        self.assertEqual(self.__buffer, buffer)
+
+        garbage = "aeioubcdfghjkl"
+        self.assertRaises(AttributeError, self.__splicer.Source, garbage)
+        self.assertNotEqual(garbage, self.__splicer.Source())
+
+        self.__splicer.ResetSource()
+        self.assertEqual(sys.stdin, self.__splicer.Source())
+        self.assertEqual("STDIN", self.__splicer.SourceFileName())
+
     ##############################################################
     # Boiler Plate
     ##############################################################
 
     def setUp(self):
+        # This really indicates that I need a TestSuite. Or, at least,
+        # multiple TestCase instances. Since frequently I'll be working
+        # with files on disk rather than memory.
+        # (Though, honestly, I shouldn't be)
         self.__buffer = io.BytesIO(self.buffer)
 
         #self.__splicer = splice.Splicer(self.__ui)
         self.__splicer = splice.Splicer(ui.DoesNothing())
         # Just to give it something vaguely interesting to work with
         self.__splicer.BufferSize(len(self.buffer)/15)
-        self.__splicer.SetSourceFileName("quetzalcoatl.testing")
-
-    def __KillTestSplice(self, directory = "quetzalcoatl.testing.split"):
-        if os.path.exists(directory):
-            files = os.listdir(directory)
-            for f in files:
-                os.unlink(f)
-
-    def __KillTestDirectory(self, location = "quetzalcoatl.testing.split"):
-        if os.path.exists(location):
-            self.__KillTestSplice(location)
-            os.unlink(location)
+        self.__splicer.SourceFileName("quetzalcoatl.testing")
+        self.__splicer.Source(self.__buffer)
 
     def tearDown(self):
-        self.__KillTestDirectory(self.__splicer.DestinationDirectory())
-
-        self.__splicer.Dispose()
+        dst = self.__splicer.DestinationDirectory()
+        if os.path.exists(dst):
+            shutil.rmtree(dst)
 
         # Totally redundant, since it's just a memory buffer and __splicer.Dispose will handle this
         self.__buffer.close()
