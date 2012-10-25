@@ -14,11 +14,9 @@
 from __future__ import with_statement
 
 import hashlib, logging, os, sys
-logging.basicConfig(level=logging.DEBUG)
+import myexceptions
 
-# This really isn't the appropriate parent class
-class VersionError(IOError):
-  pass
+logging.basicConfig(level=logging.DEBUG)
 
 class Splicer:
   # FIXME: Really should have two seperate classes for merging and splitting
@@ -28,10 +26,8 @@ class Splicer:
     # Just pick a default
     self._mode = "split"
 
-    # Working restartably is really more complicated and slower.
-    # Besides, it was the original default.
-    # Currently only really applies to splitting
-    self._restartable = False
+    # Since this is what we almost always want
+    self._repairing = False
 
     # Try to play unix-nice
     # can't do this when splitting.  No good way to tell what the output file
@@ -42,8 +38,8 @@ class Splicer:
 
     self._version = "0.0.2"
 
-    # Seems like a safe default. Play with it
-    # Works great for small files. Not so much for big ones
+    # This pretty much forces the user to specify a size. It's tempting
+    # to set it to 0 or None and change it into a required option
     self._bufferSize = 1
     
     # Start with a default that kind of makes sense for piping from STDIN
@@ -58,14 +54,11 @@ class Splicer:
     if self._mode == "merge":
       self._Merge()
     elif self._mode == "split":
-      if not self._restartable:
-        self._Split()
-      else:
-        def DefaultErrorHandler(count):
-            response = raw_input("Error reading block # " + str(count) + ". Keep trying?")
-            return response.trim()[0].lower() == 'y'
+      def DefaultErrorHandler(count):
+        response = raw_input("Error reading block # " + str(count) + ". Keep trying?")
+        return response.trim()[0].lower() == 'y'
+      self._RestartableSplit(DefaultErrorHandler)
 
-        self._RestartableSplit(DefaultErrorHandler)
     else:
       raise NotImplementedError("Unknown mode: " + str(self._mode))
 
@@ -77,7 +70,7 @@ class Splicer:
     self._mode = "merge"
 
   def SetRepairSplice(self, mode):
-    self._restartable = mode
+    self._repairing = mode
 
   def SetSourceFileName(self, name):
     self._sourceFileName = name
@@ -99,6 +92,9 @@ class Splicer:
 
   def _Merge(self):
     ''' Restore a splice to a single file '''
+
+    # FIXME: Break this into multiple methods. Maybe even its own class
+
     # Suppose I could pipe the details from STDIN, but it just doesn't seem to
     # make any sense.  But what about sending them to STDOUT?
     if not self._sourceFileName:
@@ -141,7 +137,7 @@ class Splicer:
         self._bufferSize = int(directory_file.readline().split(' ')[1].strip())
         digest = hashlib.sha256sum()
       else:
-        raise VersionError("Unknown version")
+        raise myexceptions.VersionError("Unknown version")
 
     # *really* tempting to just use magic strings everywhere for version numbers
     # Are they really any less confusing than trying to deal with a variable?
@@ -211,10 +207,12 @@ class Splicer:
     elif version == '0.0.1':
       # This should really be easy to fix. The only real difference is
       # that 0.0.1 used md5 for the checksum
+      # FIXME: That should already be fixed. So this branch should just
+      # disappear
       self.logger.error("Currently incompatible with version 0.0.1 chunks")
-      raise VersionError("Currently backwards incompatible")
+      raise myexceptions.VersionError("Currently backwards incompatible")
     else:
-      raise VersionError("Not smart enough to deal with a version '" + version + "' split")
+      raise myexceptions.VersionError("Not smart enough to deal with a version '" + version + "' split")
 
   def __PickSourceFile(self):
     ''' Caller is responsible for closing '''
@@ -347,6 +345,11 @@ class Splicer:
       raise NotImplementedError("What do I want to do here?")
 
   def _RestartableSplit(self, error_handler):
+    # This is pretty much redundant and should probably go away.
+    # The error_handler is particularly obnoxious
+    return self.__ActualSplitter(error_handler)
+
+  def __ActualSplitter(self, error_handler):
     source = self.__PickSourceFile()
     destination_directory = self.__PickDestinationDirectory()
     count = 0
@@ -371,10 +374,12 @@ class Splicer:
           '''
           assert False, "Obviously don't want this enabled on a first pass"
           '''
-          msg = "Missing file # %d. Try to replace?" % (count,)
-          s = raw_input(msg)
-          if s[0].lower() != 'y':
-            continue
+          if self._repairing:
+            msg = "Missing file # %d. Try to replace?" % (count,)
+            s = raw_input(msg)
+            if s[0].lower() != 'y':
+              count += 1
+              continue
           
           # Read another chunk from the source, just like with standard _Split
           try:
@@ -401,6 +406,7 @@ class Splicer:
 
             block = source.read(self._bufferSize)
             if not block:
+              # EOF. We're done
               break
             if finished:
               # This isn't pretty, but I'm in a hurry.
@@ -417,6 +423,9 @@ class Splicer:
 
               # This is problematic. Don't really have any guarantee
               # that each read will get bufferSize bytes.
+              # Even though that *is* the behavior I've seen so far.
+              # Technically, I should be keeping a running total of all
+              # the chunk sizes
               # Worry about it if it ever becomes an issue
               source.seek(count * self._bufferSize)
               continue
@@ -437,16 +446,8 @@ class Splicer:
             if self._bufferSize != bytes:
               finished = True
 
-          # Seek forward in the source file?
-          # Or wait until there's another chunk to read from there?
-          # Not optimal, but simple
-          # See the comment above in the read section about when you'd
-          # want to use which code pegment for a seek
-          # It's cheesy, but pragmatic
-          '''
-          assert False, "Comment out one or the other."
-          source.seek(bytes, 1)
-          '''
+          if not self._repairing:
+            source.seek(bytes, 1)
           
         # update the checksum
         digest.update(block)
@@ -463,6 +464,8 @@ class Splicer:
       self.__CloseIfSafe(source)
 
   def _Split(self):
+    raise myexceptions.ObsoleteMethod("Has gone away")
+
     # FIXME: These either need to be turned into member variables or
     # assigned as a tuple by a helper method, just to reduce duplicate
     # code

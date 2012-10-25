@@ -5,6 +5,8 @@
 import getopt, logging, sys
 import splice
 
+logging.basicConfig(level=logging.DEBUG)
+
 class Program:
     def __init__(self, argv):
         self.__argv = argv
