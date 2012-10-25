@@ -24,6 +24,9 @@ logging.basicConfig(level=logging.DEBUG)
 # a CPU-bound process
 __DEBUG = True
 
+def SwitchToDebug(d = True):
+    __DEBUG = d
+
 class Splicer:
     # FIXME: Really should have two seperate classes for merging and splitting
     # instead of handling it this way
@@ -77,6 +80,7 @@ class Splicer:
         self._repairing = mode
 
     def SetSourceFileName(self, name):
+        # FIXME: This should be both Getter and Setter
         self._sourceFileName = name
 
     def Version(self):
@@ -93,6 +97,19 @@ class Splicer:
             self._working_directory = pwd
 
         return self._working_directory
+
+    def DestinationDirectory(self):
+        # Better would be to make this a member variable calculated whenever "Base Name" is set
+
+        # Just go with the file name
+        # Note that this depends on the source file being in a separate
+        # directory
+        base_name = self.__PickBaseName()
+
+        # Somewhere to put the pieces
+        destination_directory = base_name + '.split'
+
+        return destination_directory
 
     ##################################################################################
     # Merging
@@ -262,17 +279,6 @@ class Splicer:
     def __PickBaseName(self):
         return os.path.split(self._sourceFileName)[1]
     
-    def __PickDestinationDirectory(self):
-        # Just go with the file name
-        # Note that this depends on the source file being in a separate
-        # directory
-        base_name = self.__PickBaseName()
-
-        # Somewhere to put the pieces
-        destination_directory = base_name + '.split'
-
-        return destination_directory
-
     def __CreateDirectory(self, destination_directory):
         # Note that trying to recreate an existing directory will raise
         # exceptions
@@ -453,7 +459,7 @@ class Splicer:
 
     def __ActualSplitter(self):
         source = self.__PickSourceFile()
-        destination_directory = self.__PickDestinationDirectory()
+        destination_directory = self.DestinationDirectory()
         count = 0
         digest = hashlib.sha256()
 
