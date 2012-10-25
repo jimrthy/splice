@@ -232,279 +232,301 @@ class Splicer:
             else:
                 self.logger.error("Wrong chunk count. Expected %d. Have %d" % (chunk_count, count))
 
-  #################################################################33
-  # Splitting
-  #################################################################33
+    #################################################################33
+    # Splitting
+    #################################################################33
 
-  def __PickSourceFile(self):
-    ''' Caller is responsible for closing '''
-    if not self._sourceFileName:
-      self._sourceFileName = 'STDIN'
-      source = sys.stdin
-    else:
-      source = open(self._sourceFileName, "rb")
+    def __PickSourceFile(self):
+        ''' Caller is responsible for closing '''
+        if not self._sourceFileName:
+            self._sourceFileName = 'STDIN'
+            source = sys.stdin
+        else:
+            source = open(self._sourceFileName, "rb")
 
-      source.seek(0, 2)
-      self.__source_size = source.tell()
-      source.seek(0)
+        # i.e. Go to end
+        source.seek(0, 2)
+        self.__source_size = source.tell()
+        # and then back to beginning
+        source.seek(0)
 
-    return source
+        return source
 
-  def __PickBaseName(self):
-    return os.path.split(self._sourceFileName)[1]
+    def __PickBaseName(self):
+        return os.path.split(self._sourceFileName)[1]
     
-  def __PickDestinationDirectory(self):
-    # Just go with the file name
-    # Note that this depends on the source file being in a separate
-    # directory
-    base_name = self.__PickBaseName()
+    def __PickDestinationDirectory(self):
+        # Just go with the file name
+        # Note that this depends on the source file being in a separate
+        # directory
+        base_name = self.__PickBaseName()
 
-    # Somewhere to put the pieces
-    destination_directory = base_name + '.split'
+        # Somewhere to put the pieces
+        destination_directory = base_name + '.split'
 
-    return destination_directory
+        return destination_directory
 
-  def __CreateDirectory(self, destination_directory):
-    # Note that trying to recreate an existing directory will raise
-    # exceptions
+    def __CreateDirectory(self, destination_directory):
+        # Note that trying to recreate an existing directory will raise
+        # exceptions
 
-    if os.path.exists(destination_directory):
-      assert False, "Duplicate destination: " + str(destination_directory)
+        if os.path.exists(destination_directory):
+            assert False, "Duplicate destination: " + str(destination_directory)
 
-    try:
-      os.mkdir(destination_directory)
-    except OSError:
-      # FIXME: Handle this
-      raise
-    except WindowsError:
-      # Will the presence of this cause issues outside Windows?
-      self.logger.error("Destination directory already exists")
-      raise
+        try:
+            os.mkdir(destination_directory)
+        except OSError:
+            # FIXME: Handle this
+            raise
+        except WindowsError:
+            # Will the presence of this cause issues outside Windows?
+            self.logger.error("Destination directory already exists")
+            raise
+        
+    def __CloseIfSafe(self, source):
+        if self._sourceFileName != 'STDIN':
+            # Shouldn't hurt to call this on an object that's already closed
+            source.close()
 
-  def __CloseIfSafe(self, source):
-    if self._sourceFileName != 'STDIN':
-      # Shouldn't hurt to call this on an object that's already closed
-      source.close()
+    def __PickChunkDigits(self, memo=[]):
+        ''' How many digits do we need to account for all the chunks? '''
 
-  def __PickChunkDigits(self):
-    ''' How many digits do we need to account for all the chunks? '''
-    # Really should memoize this
-    # Horrible way to do this
-    chunk_count = self.__source_size / self._bufferSize
-    if self.__source_size % self._bufferSize != 0:
-      # Account for the final fragmentary chunk
-      chunk_count += 1
+        if not memo:
+            # Really should memoize this
+            # Horrible way to do this
+            chunk_count = self.__source_size / self._bufferSize
+            if self.__source_size % self._bufferSize != 0:
+                # Account for the final fragmentary chunk
+                chunk_count += 1
 
-    result = 0
+            result = 0
+
+            if chunk_count < 10:
+                result = 1
+            elif chunk_count < 100:
+                result = 2
+            elif chunk_count < 1000:
+                result = 3
+            elif chunk_count < 10000:
+                result = 4
+            elif chunk_count < 100000:
+                result = 5
+            else:
+                self.logger.debug( "Source Size: %d BufferSize: %d Chunk Count: %d" % 
+                                   (self.__source_size,
+                                    self._bufferSize, chunk_count,))
+
+                # Getting more than 10000 files in a single directory used
+                # to be a horribly bad idea in windows. No idea whether that's
+                # still true, but it still seems like a bad idea
+                assert False, "Adjust buffer size"
+
+            memo.append(result)
+
+        return memo[0]
+
+    def __FileNameFormatString(self):
+        "What format string should be used for building the destintion file names?"
+        chunk_count = self.__PickChunkDigits()
+        return '%s.%0' + str(chunk_count) + 'd.chunk'
+
+    def __PickDestinationFileName(self, destination_directory, count):
+        # I really don't want to do this every time. But it isn't like
+        # this sucker's CPU-bound
+        base_name = self.__PickBaseName()
+
+        # How many digits do we need to accomodate?
+        format_string = self.__FileNameFormatString()
     
-    if chunk_count < 10:
-      result = 1
-    elif chunk_count < 100:
-      result = 2
-    elif chunk_count < 1000:
-      result = 3
-    elif chunk_count < 10000:
-      result = 4
-    elif chunk_count < 100000:
-      result = 5
-    else:
-      self.logger.debug( "Source Size: %d BufferSize: %d Chunk Count: %d" % (self.__source_size,
-        self._bufferSize, chunk_count,))
+        # FIXME: Be smarter than this.  Could very well have more than 1000
+        # chunks.  Not that hard to figure out. file size / chunk size.
+        # But get this working first
+        destination_name = format_string % (base_name, count)
 
-      # Getting more than 10000 files in a single directory used
-      # to be a horribly bad idea in windows. No idea whether that's
-      # still true, but it still seems like a bad idea
-      assert False, "Adjust buffer size"
+        # Finally build the actual file name string
+        destination_path = os.path.join(destination_directory, destination_name)
 
-    return result
+        return destination_path
 
-  def __FileNameFormatString(self):
-    "What format string should be used for building the destintion file names?"
-    chunk_count = self.__PickChunkDigits()
-    return '%s.%0' + str(chunk_count) + 'd.chunk'
+    def __SaveDetails(self, count, digest, destination_directory):
+        ''' How do we fit the chunks back together again? '''
 
-  def __PickDestinationFileName(self, destination_directory, count):
-    # I really don't want to do this every time. But it isn't like
-    # this sucker's CPU-bound
-    base_name = self.__PickBaseName()
+        # Not that this is particularly meaningful without all the chunks
+        checksum = digest.hexdigest()
 
-    # How many digits do we need to accomodate?
-    format_string = self.__FileNameFormatString()
-    
-    # FIXME: Be smarter than this.  Could very well have more than 1000
-    # chunks.  Not that hard to figure out. file size / chunk size.
-    # But get this working first
-    destination_name = format_string % (base_name, count)
-    destination_path = os.path.join(destination_directory, destination_name)
+        base_name = self.__PickBaseName()
+        destination_name = base_name + '.details'
+        destination_path = os.path.join(destination_directory, destination_name)
+        with open(destination_path, 'w') as destination:
+            destination.write("Version: " + self._version + '\n')
+            destination.write('Chunk Count: ' + str(count) + '\n')
+            destination.write('Checksum: ' + checksum + '\n')
+            destination.write('BlockSize: ' + str(self._bufferSize) + '\n')
 
-    return destination_path
-
-  def __SaveDetails(self, count, digest, destination_directory):
-    # or something similar
-    checksum = digest.hexdigest()
-
-    base_name = self.__PickBaseName()
-    destination_name = base_name + '.details'
-    destination_path = os.path.join(destination_directory, destination_name)
-    with open(destination_path, 'w') as destination:
-      destination.write("Version: " + self._version + '\n')
-      destination.write('Chunk Count: ' + str(count) + '\n')
-      destination.write('Checksum: ' + checksum + '\n')
-      destination.write('BlockSize: ' + str(self._bufferSize) + '\n')
-
-  def __TryToReadDifficultBlock(self, source, index):
-    try:
-      source.seek(self._bufferSize * count)
+    def __TryToReadDifficultBlock(self, source, index):
+        raise NotImplementedError("What should this do?")
+        try:
+            source.seek(self._bufferSize * count)
       
-      block = source.read(self._bufferSize)
-      if not block:
+            block = source.read(self._bufferSize)
+            if not block:
 #break
-        # Actually, this indicates EOF, so we're done.
-        pass
+                # Actually, this indicates EOF, so we're done.
+                pass
 
-    except IOError:
-      # And should it really be handled by another, smaller file?
-      raise NotImplementedError("What do I want to do here?")
-    finally:
-      # Is there anything that needs to happen here?
-      pass
+        except IOError:
+            # And should it really be handled by another, smaller file?
+            raise NotImplementedError("What do I want to do here?")
+        finally:
+            # Is there anything that needs to happen here?
+            pass
 
-  def __ActualSplitter(self):
-    source = self.__PickSourceFile()
-    destination_directory = self.__PickDestinationDirectory()
-    count = 0
-    digest = hashlib.sha256()
+    def __ActualSplitter(self):
+        source = self.__PickSourceFile()
+        destination_directory = self.__PickDestinationDirectory()
+        count = 0
+        digest = hashlib.sha256()
 
-    try:
-      if not os.path.exists(destination_directory):
-        self.__CreateDirectory(destination_directory)
-      else:
-        self.logger.info("Using existing directory, in an attempt to restart")
-        # FIXME: If the .details file exists in the directory, read it and hope
-        # to find out how many files are supposed to be present
+        try:
+            if not os.path.exists(destination_directory):
+                self.__CreateDirectory(destination_directory)
+            else:
+                self.logger.warn("Using existing directory, in an attempt to restart")
+                # FIXME: If the .details file exists in the directory, read it and hope
+                # to find out how many files are supposed to be present
 
-      finished = False
+            finished = False
 
-      while True:
-        destination_path = self.__PickDestinationFileName(destination_directory,
+            while True:
+                destination_path = self.__PickDestinationFileName(destination_directory,
                                                           count)
         
-        if not os.path.exists(destination_path):
-            if finished:
-                # This is what we expect to see
-                # (finished, with no "next" file to deal with)
-                # Really should check that size match source's EOF.
-                # Maybe in a future version
-                break
-            if self._repairing:
-                # it's tempting to do some prompting here. Maybe this
-                # is a sector we're willing to concede is just bad and
-                # skip, while we'd like to try another sector that failed
-                # during the last run further down the line.
-                # This is what I was trying initially, but it was annoying.
-
-                # OTOH, this is pretty much the perfect opportunity to switch
-                # into a recursive mode, trying to recover smaller chunks.
-                raise NotImplementedError("That seems to be next on the agenda")
+                if not os.path.exists(destination_path):
+                    if finished:
+                        # This is what we expect to see
+                        # (finished, with no "next" file to deal with)
+                        # Really should check that size match source's EOF.
+                        # Maybe in a future version
+                        break
+                    if self._repairing:
+                        # it's tempting to do some prompting here. Maybe this
+                        # is a sector we're willing to concede is just bad and
+                        # skip, while we'd like to try another sector that failed
+                        # during the last run further down the line.
+                        # This is what I was trying initially, but it was annoying.
+                        
+                        # OTOH, this is pretty much the perfect opportunity to switch
+                        # into a recursive mode, trying to recover smaller chunks.
+                        raise NotImplementedError("That seems to be next on the agenda")
             
-            try:
-                # There are really two very different standpoints from a performance
-                # standpoint. The first time through, there won't be any pre-existing
-                # destination files. In that case, it really doesn't make any sense
-                # to seek between reads.
-                # OTOH, hopefully almost all the pieces were read the first time through.
-                # On the second pass, we should already have the vast majority of chunks
-                # (or we're *really* screwed), so it doesn't make any sense to seek
-                # in source file *unless* there's a block to read
-                # When the seek actually happens is the difference
-                # between the repairing and standard versions. There's no particular
-                # reason for the standard not to build as much of the broken splice
-                # as possible
+                    else:
+                        # Standard path...not particularly worried about I/O failure
+                        try:
+                            # There are really two very different standpoints from a performance
+                            # standpoint. The first time through, there won't be any pre-existing
+                            # destination files. In that case, it really doesn't make any sense
+                            # to seek between reads.
+                            # OTOH, hopefully almost all the pieces were read the first time through.
+                            # On the second pass, we should already have the vast majority of chunks
+                            # (or we're *really* screwed), so it doesn't make any sense to seek
+                            # in source file *unless* there's a block to read
+                            # When the seek actually happens is the difference
+                            # between the repairing and standard versions. There's no particular
+                            # reason for the standard not to build as much of the broken splice
+                            # as possible
 
-                source.seek(self._bufferSize * count)
+                            # if we *aren't* repairing, then there shouldn't be any need to seek
+                            # here. It'll do the seeking after any errors take place
+                            raise NotImplementedError("No, this isn't right")
+                            source.seek(self._bufferSize * count)
             
-                block = source.read(self._bufferSize)
-                if not block:
-                    # EOF. We're done
-                    break
-                if finished:
-                    # This isn't pretty, but I'm in a hurry.
-                    # Best bet is to just delete the file with the incorrect size
-                    # and try running this agais
-                    # (what this means is that a pre-existing destination file
-                    # had an incorrect bufferSize, but it wasn't the final
-                    # chunk)
-                    assert False, "Last destination file has wrong chunk size"
+                            block = source.read(self._bufferSize)
+                            if not block:
+                                # EOF. We're done
+                                break
+                            if finished:
+                                # (No EOF even though the previously read chunk indicated that
+                                # it *should* be)
+                                # This isn't pretty, but I'm in a hurry.
+                                # Best bet is to just delete the file with the incorrect size
+                                # and try running this agais
+                                # (what this means is that a pre-existing destination file
+                                # had an incorrect bufferSize, but it wasn't the final
+                                # chunk)
+                                assert False, "Last destination file has wrong chunk size"
 
-                '''
-                # FIXME: Debug only
-                # Except that it seems likely it's needed again
-                percentage = random.randrange(0, 100)
-                if percentage < 15:
-                    raise IOError("Random test simulating read failure") '''
+                            '''
+                            # FIXME: Debug only
+                            # Except that it seems likely it's needed again
+                            percentage = random.randrange(0, 100)
+                            if percentage < 15:
+                            raise IOError("Random test simulating read failure") '''
 
-            except IOError, e:
-                msg = "Error reading block # %d (%s). Keep trying?\n" % (count, str(e),)
-                response = ui.PromptForYorN(msg)
-                if response:
-                  # Skip to the next block
-                  count += 1
+                        except IOError, e:
+                            msg = "Error reading block # %d (%s). Keep trying?\n" % (count, str(e),)
+                            response = ui.PromptForYorN(msg)
+                            if response:
+                                # Skip to the next block
+                                count += 1
 
-                  # This is problematic. Don't really have any guarantee
-                  # that each read will get bufferSize bytes.
-                  # Even though that *is* the behavior I've seen so far.
-                  # Technically, I should be keeping a running total of all
-                  # the chunk sizes
-                  # Worry about it if it ever becomes an issue
-                  if not self._repairing:
-                      # Could probably seek to self._bufferSize, relative.
-                      # But, after an IOError, who knows where tell() is?
-                      source.seek(count * self._bufferSize)
-                  continue
-                else:
-                  break
+                                # This is problematic. Don't really have any guarantee
+                                # that each read will get bufferSize bytes.
+                                # Even though that *is* the behavior I've seen so far.
+                                # Technically, I should be keeping a running total of all
+                                # the chunk sizes
+                                # Worry about it if it ever becomes an issue
+                                if not self._repairing:
+                                    # We've already established that we aren't in repairing mode.
+                                    # *Very* strong evidence that this method is *way* too long and complicated
+                                    # Could probably seek to self._bufferSize, relative.
+                                    # But, after an IOError, who knows where tell() is?
+                                    source.seek(count * self._bufferSize)
+                                continue
+                            else:
+                                break
 
-            # Save the chunk
-            with open(destination_path, "wb") as destination:
-                destination.write(block)
+                # Save the chunk
+                with open(destination_path, "wb") as destination:
+                    destination.write(block)
 
-        else: # already wrote this chunk
-          # Set this to something reasonable
-          bytes = self._bufferSize
+            else: # already wrote this chunk
+                # Set this to something reasonable
+                bytes = self._bufferSize
 
-          # Read the destination file.
-          with open(destination_path, "rb") as destination:
-            block = destination.read(self._bufferSize)
-            bytes = len(block)
-            if self._bufferSize != bytes:
-              finished = True
+                # Read the destination file.
+                with open(destination_path, "rb") as destination:
+                    block = destination.read(self._bufferSize)
+                    bytes = len(block)
+                    if self._bufferSize != bytes:
+                        finished = True
 
-          if not self._repairing:
-            source.seek(bytes, 1)
+                if not self._repairing:
+                    # Again, the distinction between the two
+                    source.seek(bytes, 1)
           
-        # update the checksum
-        digest.update(block)
+                # update the checksum
+                digest.update(block)
 
-        count  += 1
-        if (count % 1024) == 0:
-            self.__ui.UpdateProgress()
+                count  += 1
+                if (count % 1024) == 0:
+                    self.__ui.UpdateProgress()
 
-    finally:
-      # Don't necessarily want this to happen every time. It's worth
-      # contemplating
-      self.__SaveDetails(count, digest, destination_directory)
+        finally:
+            # Don't necessarily want this to happen every time. It's worth
+            # contemplating
+            self.__SaveDetails(count, digest, destination_directory)
 
-      self.__CloseIfSafe(source)
+            self.__CloseIfSafe(source)
 
-  def Dispose(self):
-    # Just a sanity check, really
-    try:
-      self._source.close()
-    except:
-      # All kinds of things could go wrong here. Maybe document them later, if
-      # they start biting me
-      pass
+    def Dispose(self):
+        # Just a sanity check, really
+        try:
+            self._source.close()
+        except:
+            # All kinds of things could go wrong here. Maybe document them later, if
+            # they start biting me
+            pass
 
 if __name__ == '__main__':
-  logging.error ("Use some sort of UI layer, such as Program or the REPL")
-  raise NotImplementedError("Not really meant for direct interactivity")
+    logging.error ("Use some sort of UI layer, such as Program or the REPL")
+    raise NotImplementedError("Not really meant for direct interactivity")
