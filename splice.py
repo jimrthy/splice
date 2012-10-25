@@ -369,12 +369,17 @@ class Splicer:
         
         if not os.path.exists(destination_path):
           if self._repairing:
-            msg = "Missing file # %d. Try to replace?" % (count,)
-            s = raw_input(msg)
-            if s.strip()[0].lower() != 'y':
-              # For whatever reason, the user has chosen to skip this piece
-              count += 1
-              continue
+              if not finished:
+                  # Honestly, this is just annoying and should go away
+                  msg = "Missing file # %d. Try to replace?" % (count,)
+                  s = raw_input(msg)
+                  if s.strip()[0].lower() != 'y':
+                      # For whatever reason, the user has chosen to skip this piece
+                      count += 1
+                      continue
+              else:
+                  # This is what we expect to see
+                  break
           
           try:
             # There are really two very different standpoints from a performance
@@ -425,8 +430,10 @@ class Splicer:
                   # the chunk sizes
                   # Worry about it if it ever becomes an issue
                   if not self._repairing:
+                      # Could probably seek to self._bufferSize, relative.
+                      # But, after an IOError, who knows where tell() is?
                       source.seek(count * self._bufferSize)
-                      continue
+                  continue
               else:
                   break
 
