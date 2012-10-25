@@ -1,6 +1,6 @@
 #! /usr/bin/env/python
 
-import unittest
+import os, unittest
 import io
 
 import splice, ui
@@ -39,16 +39,18 @@ being obnoxious about that entire thing."""
         self.__splicer = splice.Splicer(ui.DoesNothing())
         # Just to give it something vaguely interesting to work with
         self.__splicer.BufferSize(len(self.buffer)/15)
-        self.SetSourceFileName("quetzalcoatl.testing")
+        self.__splicer.SetSourceFileName("quetzalcoatl.testing")
 
     def __KillTestSplice(self, directory = "quetzalcoatl.testing.split"):
-        files = os.listdir(directory)
-        for f in files:
-            os.unlink(f)
+        if os.path.exists(directory):
+            files = os.listdir(directory)
+            for f in files:
+                os.unlink(f)
 
     def __KillTestDirectory(self, location = "quetzalcoatl.testing.split"):
-        self.__KillTestSplice(location)
-        os.unlink(location)
+        if os.path.exists(location):
+            self.__KillTestSplice(location)
+            os.unlink(location)
 
     def tearDown(self):
         self.__KillTestDirectory(self.__splicer.DestinationDirectory())
