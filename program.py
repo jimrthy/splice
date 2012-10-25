@@ -2,7 +2,7 @@
 
 ''' Wrapper file for the UI to the splicer '''
 
-import sys
+import getopt, logging, sys
 import splice
 
 class Program:
@@ -15,8 +15,8 @@ class Program:
 
     def main(self):
         try:
-            self.logger.debug("Checking options")
-            opts, args = getopt.getopt( self.argv, "hrsmf:vb:d:", 
+            self.__logger.debug("Checking options")
+            opts, args = getopt.getopt( self.__argv, "hrsmf:vb:d:", 
                                         ["help", "restart", "split", 
                     "merge","file=", "version", "buffer=", 'directory='])
         except getopt.GetoptError:
@@ -25,7 +25,7 @@ class Program:
             # Really? This is the best magic number I could come up with?
             sys.exit(2)
         else:
-            self.logger.debug("Manipulating options")
+            self.__logger.debug("Manipulating options")
             for opt, arg in opts:
                 if opt in("-h", "--help"):
                     print self.usage()
@@ -35,7 +35,7 @@ class Program:
                     self.__logger.debug("Merging")
                 elif opt in ("-r", "--restart"):
                     self.__splicer.SetRepairSplice(True)
-                    self.__logger.trace("Repairing")
+                    self.__logger.info("Repairing")
                 elif opt in ("-f", "--file"):
                     # Would be nice to loop through args and split them 1 at a time, creating
                     # subdirectories as appropriate. Do that later, when I have time
@@ -46,7 +46,7 @@ class Program:
                     # shouldn't be handling the source file i/o anyway.
                     # Do that next
                     self.__splicer.SetSourceFileName(arg)
-                    self.__logger.trace("Splicing %s" % (arg,))
+                    self.__logger.info("Splicing %s" % (arg,))
                 elif opt in ("-v", "--version"):
                     print self.__splicer.Version()
                     sys.exit()
@@ -55,9 +55,9 @@ class Program:
                 elif opt in ("-d", "--directory"):
                     self.__splicer.WorkingDirectory(arg)
 
-            self.logger.debug("Operating")
-            self.Operate()
-            self.logger.debug("Done")
+            self.__logger.debug("Operating")
+            self.__splicer.Operate()
+            self.__logger.debug("Done")
 
     def usage(self):
         instructions = """./splice.py [-h -m -s -r -v] [-d directory] [-f file]
@@ -69,6 +69,9 @@ class Program:
 -f file: operate on file (STDIN by default...although that probably doesn't work)"""
         return instructions
 
+    def dispose(self):
+        self.__splicer.dispose()
+
 if __name__ == '__main__':
   program = Program(sys.argv[1:])
   try:
@@ -79,4 +82,4 @@ if __name__ == '__main__':
     program.dispose()
 
   logging.debug("Exiting")
-logging.trace("Good-bye")
+logging.info("Good-bye")

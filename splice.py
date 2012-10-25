@@ -13,8 +13,7 @@
 
 from __future__ import with_statement
 
-import sys, getopt, os
-import hashlib
+import hashlib, logging, os, sys
 logging.basicConfig(level=logging.DEBUG)
 
 # This really isn't the appropriate parent class
@@ -340,7 +339,8 @@ class Splicer:
       
       block = source.read(self._bufferSize)
       if not block:
-        break
+#break
+        pass
 
     finally:
       # And should it really be handled by another, smaller file?
@@ -519,5 +519,5 @@ class Splicer:
       pass
 
 if __name__ == '__main__':
-  logging.error "Use some sort of UI layer, such as Program or the REPL"
-  throw NotImplementedError("Not really meant for direct interactivity")
+  logging.error ("Use some sort of UI layer, such as Program or the REPL")
+  raise NotImplementedError("Not really meant for direct interactivity")
