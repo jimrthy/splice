@@ -93,7 +93,7 @@ class Splicer:
     # Merging
     ##################################################################################
 
-    def __PickDigestAndBufferSize(self, version):
+    def __PickDigest(self, version):
         ''' An unfortunate leftover from the way I'm currently handling version details '''
         # Returns the hashing style. Sets internal buffer size property
         
@@ -103,18 +103,8 @@ class Splicer:
         digest = None
 
         if version == '0.0.1':
-            # TODO: open a .chunk file and base this on that instead
-            # Better: just use a restartable buffer and let the chunks be any
-            # size they like.
-            # That's really for future improvements, though. All 0.0.1 chunks
-            # were hard-coded to be 1024 bytes long
-            # FIXME: That isn't true. It had a -b command line argument, even
-            # if I don't ever remember using it
-            self._bufferSize = 1024;
-                
             digest = hashlib.md5()
         elif version == '0.0.2':
-            self._bufferSize = int(directory_file.readline().split(' ')[1].strip())
             digest = hashlib.sha256()
         else:
             raise myexceptions.VersionError("Unknown version")
@@ -189,7 +179,18 @@ class Splicer:
             # stash this for later
             expected_checksum = details_file.readline().split(' ')[1].strip()
 
-        digest = self.__PickDigestAndBufferSize(version)
+            if version == '0.0.1':
+                # This really isn't justified. The -b parameter was available then. I just
+                # don't recall it ever being used. Does this actually matter on the
+                # merge? I'm just reading 'destination' files until the end, then merging
+                # them back into the 'source'.
+                # Actually, that's a *really* important detail for dealing with trying to
+                # work around bad sectors
+                self._bufferSize = 1024
+            elif version == '0.0.2':
+                self._bufferSize = int(details_file.readline().split(' ')[1].strip())
+
+        digest = self.__PickDigest(version)
 
         # *really* tempting to just use magic strings everywhere for version numbers
         # Are they really any less confusing than trying to deal with a variable?
@@ -205,7 +206,7 @@ class Splicer:
 
             files_to_merge = self.__Chunks(list_of_file_names, source_root_name)
             if len(files_to_merge) == chunk_count:
-                self.logger.debug("Merging " + str(count) + " chunks into '" + source_root_name + "'")
+                self.logger.debug("Merging " + str(chunk_count) + " chunks into '" + source_root_name + "'")
                 # OK, we can at least try to merge the pieces
                 files_to_merge.sort() # Seems reasonable to require them to be in alphabetical order
 
@@ -226,7 +227,8 @@ class Splicer:
                 actual_checksum = digest.hexdigest()
 
                 if actual_checksum != expected_checksum:
-                    self.logger.warning("Checksums don't match!")
+                    # Should probably go ahead and throw an exception here
+                    self.logger.error("Checksums don't match!")
                 else:
                     self.logger.debug("Merge succeeded (checksum: '" + actual_checksum + "')") 
             else:
@@ -435,11 +437,6 @@ class Splicer:
                             # reason for the standard not to build as much of the broken splice
                             # as possible
 
-                            # if we *aren't* repairing, then there shouldn't be any need to seek
-                            # here. It'll do the seeking after any errors take place
-                            raise NotImplementedError("No, this isn't right")
-                            source.seek(self._bufferSize * count)
-            
                             block = source.read(self._bufferSize)
                             if not block:
                                 # EOF. We're done
@@ -485,24 +482,24 @@ class Splicer:
                             else:
                                 break
 
-                # Save the chunk
-                with open(destination_path, "wb") as destination:
-                    destination.write(block)
+                    # Save the chunk
+                    with open(destination_path, "wb") as destination:
+                        destination.write(block)
 
-            else: # already wrote this chunk
-                # Set this to something reasonable
-                bytes = self._bufferSize
+                else: # already wrote this chunk
+                    # Set this to something reasonable
+                    bytes = self._bufferSize
 
-                # Read the destination file.
-                with open(destination_path, "rb") as destination:
-                    block = destination.read(self._bufferSize)
-                    bytes = len(block)
-                    if self._bufferSize != bytes:
-                        finished = True
+                    # Read the destination file.
+                    with open(destination_path, "rb") as destination:
+                        block = destination.read(self._bufferSize)
+                        bytes = len(block)
+                        if self._bufferSize != bytes:
+                            finished = True
 
-                if not self._repairing:
-                    # Again, the distinction between the two
-                    source.seek(bytes, 1)
+                    if not self._repairing:
+                        # Again, the distinction between the two
+                        source.seek(bytes, 1)
           
                 # update the checksum
                 digest.update(block)
