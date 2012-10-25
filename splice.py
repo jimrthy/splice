@@ -14,6 +14,7 @@
 from __future__ import with_statement
 
 import hashlib, logging, os, sys
+import random # debugging only
 import myexceptions
 
 logging.basicConfig(level=logging.DEBUG)
@@ -54,10 +55,7 @@ class Splicer:
     if self._mode == "merge":
       self._Merge()
     elif self._mode == "split":
-      def DefaultErrorHandler(count):
-        response = raw_input("Error reading block # " + str(count) + ". Keep trying?")
-        return response.trim()[0].lower() == 'y'
-      self._RestartableSplit(DefaultErrorHandler)
+      self.__ActualSplitter()
 
     else:
       raise NotImplementedError("Unknown mode: " + str(self._mode))
@@ -344,12 +342,12 @@ class Splicer:
       # And should it really be handled by another, smaller file?
       raise NotImplementedError("What do I want to do here?")
 
-  def _RestartableSplit(self, error_handler):
+  def _RestartableSplit(self):
     # This is pretty much redundant and should probably go away.
     # The error_handler is particularly obnoxious
-    return self.__ActualSplitter(error_handler)
+      raise ObsoleteMethod()
 
-  def __ActualSplitter(self, error_handler):
+  def __ActualSplitter(self):
     source = self.__PickSourceFile()
     destination_directory = self.__PickDestinationDirectory()
     count = 0
@@ -373,7 +371,7 @@ class Splicer:
           if self._repairing:
             msg = "Missing file # %d. Try to replace?" % (count,)
             s = raw_input(msg)
-            if s[0].lower() != 'y':
+            if s.strip()[0].lower() != 'y':
               # For whatever reason, the user has chosen to skip this piece
               count += 1
               continue
@@ -393,7 +391,7 @@ class Splicer:
             # as possible
 
             source.seek(self._bufferSize * count)
-
+            
             block = source.read(self._bufferSize)
             if not block:
               # EOF. We're done
@@ -406,22 +404,31 @@ class Splicer:
               # had an incorrect bufferSize, but it wasn't the final
               # chunk)
               assert False, "Last destination file has wrong chunk size"
-          except IOError:
-            if errorHandler(count):
-              # Skip to the next block
-              count += 1
 
-              # This is problematic. Don't really have any guarantee
-              # that each read will get bufferSize bytes.
-              # Even though that *is* the behavior I've seen so far.
-              # Technically, I should be keeping a running total of all
-              # the chunk sizes
-              # Worry about it if it ever becomes an issue
-              if not self._repairing:
-                  source.seek(count * self._bufferSize)
-              continue
-            else:
-              break
+            # FIXME: Debug only
+            percentage = random.randrange(0, 100)
+            if percentage < 15:
+                raise IOError("Random test simulating read failure")
+
+          except IOError, e:
+              msg = "Error reading block # %d (%s). Keep trying?\n" % (count, str(e),)
+              response = raw_input(msg)
+              print
+              if response.strip()[0].lower() == 'y':
+                  # Skip to the next block
+                  count += 1
+
+                  # This is problematic. Don't really have any guarantee
+                  # that each read will get bufferSize bytes.
+                  # Even though that *is* the behavior I've seen so far.
+                  # Technically, I should be keeping a running total of all
+                  # the chunk sizes
+                  # Worry about it if it ever becomes an issue
+                  if not self._repairing:
+                      source.seek(count * self._bufferSize)
+                      continue
+              else:
+                  break
 
           # Save the chunk
           with open(destination_path, "wb") as destination:
