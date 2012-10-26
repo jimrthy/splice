@@ -34,42 +34,42 @@ class Splicer:
         self.__ui = ui
 
         # Just pick a default
-        self._mode = "split"
+        self.__mode = "split"
 
         # Since this is what we almost always want
-        self._repairing = False
+        self.__repairing = False
 
         self.ResetSource()
 
-        self._version = "0.0.2"
+        self.__version = "0.0.2"
 
         # This pretty much forces the user to specify a size. It's tempting
         # to set it to 0 or None and change it into a required option
-        self._bufferSize = 1
+        self.__buffer_size = 1
     
-        self.logger = logging.getLogger("splice.Splicer")
+        self.__logger = logging.getLogger("splice.Splicer")
         # FIXME: Configure the logger to send its output to self.__ui
 
-        self._working_directory = '.'
+        self.__working_directory = '.'
 
     def Operate(self):
         ''' Effectively, this is main() '''
-        if self._mode == "merge":
+        if self.__mode == "merge":
             self._Merge()
-        elif self._mode == "split":
+        elif self.__mode == "split":
             self.__ActualSplitter()
         else:
-            raise NotImplementedError("Unknown mode: " + str(self._mode))
+            raise NotImplementedError("Unknown mode: " + str(self.__mode))
 
     #########################################################
     # Some more or less useful getters/setters boilerplate
     #########################################################
 
     def SetMergeMode(self):
-        self._mode = "merge"
+        self.__mode = "merge"
 
     def SetRepairSplice(self, mode):
-        self._repairing = mode
+        self.__repairing = mode
 
     def SourceFileName(self, name=None):
         if name is not None:
@@ -88,8 +88,6 @@ class Splicer:
     def Source(self, src=None):
         if src is not None:
             try:
-                # This is *definitely* going to cause awkward things to happen if src isn't seekable
-                # Worry about that when it happens
                 src.seek(0, 2)
                 self.__source_size = src.tell()
                 src.seek(0, 0)
@@ -101,19 +99,19 @@ class Splicer:
         return self.__source
 
     def Version(self):
-        return self._version
+        return self.__version
 
     def BufferSize(self, size=None):
         if size is not None:
-            self._bufferSize = int(size)
+            self.__buffer_size = int(size)
 
-        return self._bufferSize
+        return self.__buffer_size
 
     def WorkingDirectory(self, pwd=None):
         if pwd is not None:
-            self._working_directory = pwd
+            self.__working_directory = pwd
 
-        return self._working_directory
+        return self.__working_directory
 
     def DestinationDirectory(self):
         # Better would be to make this a member variable calculated whenever "Base Name" is set
@@ -162,34 +160,33 @@ class Splicer:
         if source_root_name[:2] == ".\\":
             source_root_name = source_root_name[2:]
 
-        self.logger.debug("Combining into a file named '" + source_root_name + "'")
+        self.__logger.debug("Combining into a file named '" + source_root_name + "'")
 
         return source_root_name
 
     def __Chunks(self, list_of_file_names, source_root_name):
-        # Make sure all the chunks are there
+        ''' Which chunk files are available? '''
         count = 0
         files_to_merge = []
         for file_name in list_of_file_names:
-            #self.logger.debug("Maybe counting a file named '" + str(file_name) + "'")
+            #self.__logger.debug("Maybe counting a file named '" + str(file_name) + "'")
 
             name_pieces = file_name.split('.')
             # ignore the '.###.chunk' part.  Do it this way so I can vary the
             # length of the string that specifies the count
-            #self.logger.debug(str(name_pieces))
+            #self.__logger.debug(str(name_pieces))
             if name_pieces[-1] == 'chunk':
                 root_name = '.'.join(name_pieces[:-2])
                 if root_name == source_root_name:
                     files_to_merge.append(file_name)
                     count += 1
                 else:
-                    self.logger.debug("Not part of this split")
+                    self.__logger.debug("Not part of this split")
             else:
-                self.logger.debug(file_name + " : Not a chunk")
+                self.__logger.debug(file_name + " : Not a chunk")
 
         return files_to_merge
 
-    # FIXME: Break this into smaller pieces (yes, still)
     def _Merge(self):
         ''' Restore a splice to a single file '''
 
@@ -201,12 +198,12 @@ class Splicer:
             # No, this error message isn't very helpful
             raise NotImplementedError("Implement looking for a .details file in the pwd")
 
-        self.logger.debug("Pulling details out of the directory file '" + self._sourceFileName + "'")
+        self.__logger.debug("Pulling details out of the directory file '" + self._sourceFileName + "'")
 
         # the files that might be interesting
-        list_of_file_names = os.listdir(self._working_directory)
+        list_of_file_names = os.listdir(self.__working_directory)
 
-        details_file_name = os.path.join(self._working_directory, self._sourceFileName)
+        details_file_name = os.path.join(self.__working_directory, self._sourceFileName)
         with open(details_file_name, "r") as details_file:
             # FIXME: This really should be a YAML file
             # Version:
@@ -225,9 +222,9 @@ class Splicer:
                 # them back into the 'source'.
                 # Actually, that's a *really* important detail for dealing with trying to
                 # work around bad sectors
-                self._bufferSize = 1024
+                self.__buffer_size = 1024
             elif version == '0.0.2':
-                self._bufferSize = int(details_file.readline().split(' ')[1].strip())
+                self.__buffer_size = int(details_file.readline().split(' ')[1].strip())
 
         digest = self.__PickDigest(version)
 
@@ -238,14 +235,14 @@ class Splicer:
         # Though I just realized that I've committed a fairly major sin by breaking
         # the interface between 0.0.1 and 0.0.2. Oh, well. It isn't like anyone but
         # me has ever seen this code yet
-        if version == self._version or version == '0.0.1':
-            self.logger.debug("Have a version '" + version + "' splice that I can handle")
+        if version == self.__version or version == '0.0.1':
+            self.__logger.debug("Have a version '" + version + "' splice that I can handle")
 
             source_root_name = self.__PickSourceRootName()
 
             files_to_merge = self.__Chunks(list_of_file_names, source_root_name)
             if len(files_to_merge) == chunk_count:
-                self.logger.debug("Merging " + str(chunk_count) + " chunks into '" + source_root_name + "'")
+                self.__logger.debug("Merging " + str(chunk_count) + " chunks into '" + source_root_name + "'")
                 # OK, we can at least try to merge the pieces
                 files_to_merge.sort() # Seems reasonable to require them to be in alphabetical order
 
@@ -254,8 +251,8 @@ class Splicer:
 
                 with open(source_root_name, "wb") as destination:
                     for file_name in files_to_merge:
-                        file_path = os.path.join(self._working_directory, file_name)
-                        #self.logger.info("# " + file_path)
+                        file_path = os.path.join(self.__working_directory, file_name)
+                        #self.__logger.info("# " + file_path)
 
                         # Note the major distinction here between source and self._source (much
                         # less self.__source). Much ugliness has entered this code!
@@ -270,11 +267,11 @@ class Splicer:
 
                 if actual_checksum != expected_checksum:
                     # Should probably go ahead and throw an exception here
-                    self.logger.error("Checksums don't match!")
+                    self.__logger.error("Checksums don't match!")
                 else:
-                    self.logger.debug("Merge succeeded (checksum: '" + actual_checksum + "')") 
+                    self.__logger.debug("Merge succeeded (checksum: '" + actual_checksum + "')") 
             else:
-                self.logger.error("Wrong chunk count. Expected %d. Have %d" % (chunk_count, count))
+                self.__logger.error("Wrong chunk count. Expected %d. Have %d" % (chunk_count, count))
 
     #################################################################
     # Splitting
@@ -315,7 +312,7 @@ class Splicer:
             raise
         except WindowsError:
             # Will the presence of this cause issues outside Windows?
-            self.logger.error("Destination directory already exists")
+            self.__logger.error("Destination directory already exists")
             raise
         
     def __CloseIfSafe(self, source):
@@ -335,8 +332,8 @@ class Splicer:
         # Note that memoizing this makes re-using a splicer much more problematic
         if not memo:
             # Horrible way to do this
-            chunk_count = self.__source_size / self._bufferSize
-            if self.__source_size % self._bufferSize != 0:
+            chunk_count = self.__source_size / self.__buffer_size
+            if self.__source_size % self.__buffer_size != 0:
                 # Account for the final fragmentary chunk
                 chunk_count += 1
 
@@ -353,9 +350,9 @@ class Splicer:
             elif chunk_count < 100000:
                 result = 5
             else:
-                self.logger.debug( "Source Size: %d BufferSize: %d Chunk Count: %d" % 
+                self.__logger.debug( "Source Size: %d BufferSize: %d Chunk Count: %d" % 
                                    (self.__source_size,
-                                    self._bufferSize, chunk_count,))
+                                    self.__buffer_size, chunk_count,))
 
                 # Getting more than 10000 files in a single directory used
                 # to be a horribly bad idea in windows. No idea whether that's
@@ -399,17 +396,17 @@ class Splicer:
         destination_name = base_name + '.details'
         destination_path = os.path.join(destination_directory, destination_name)
         with open(destination_path, 'w') as destination:
-            destination.write("Version: " + self._version + '\n')
+            destination.write("Version: " + self.__version + '\n')
             destination.write('Chunk Count: ' + str(count) + '\n')
             destination.write('Checksum: ' + checksum + '\n')
-            destination.write('BlockSize: ' + str(self._bufferSize) + '\n')
+            destination.write('BlockSize: ' + str(self.__buffer_size) + '\n')
 
     def __TryToReadDifficultBlock(self, source, index):
         raise NotImplementedError("What should this do?")
         try:
-            source.seek(self._bufferSize * count)
+            source.seek(self.__buffer_size * count)
       
-            block = source.read(self._bufferSize)
+            block = source.read(self.__buffer_size)
             if not block:
 #break
                 # Actually, this indicates EOF, so we're done.
@@ -478,10 +475,10 @@ class Splicer:
         ''' Entry point for repairing one single block. Returns the block as best it can be repaired '''
         # Can't start out this way. Don't actually know where we are in the file
         #offset = source.tell()
-        initial_offset = self._bufferSize * count
-        result = self.__RecursiveRepairBlock(source, initial_offset, self._bufferSize/10, 10)
+        initial_offset = self.__buffer_size * count
+        result = self.__RecursiveRepairBlock(source, initial_offset, self.__buffer_size/10, 10)
 
-        source.seek(initial_offset + self._bufferSize)
+        source.seek(initial_offset + self.__buffer_size)
 
         return result
 
@@ -497,7 +494,7 @@ class Splicer:
             if not os.path.exists(destination_directory):
                 self.__CreateDirectory(destination_directory)
             else:
-                self.logger.warn("Using existing directory, in an attempt to restart")
+                self.__logger.warn("Using existing directory, in an attempt to restart")
                 # FIXME: If the .details file exists in the directory, read it and hope
                 # to find out how many files are supposed to be present
 
@@ -514,7 +511,7 @@ class Splicer:
                         # Really should check that size match source's EOF.
                         # Maybe in a future version
                         break
-                    if self._repairing:
+                    if self.__repairing:
                         # it's tempting to do some prompting here. Maybe this
                         # is a sector we're willing to concede is just bad and
                         # skip, while we'd like to try another sector that failed
@@ -551,7 +548,7 @@ class Splicer:
                             # reason for the standard not to build as much of the broken splice
                             # as possible                            
 
-                            block = self.__ReadBlock(self.__source, self._bufferSize)
+                            block = self.__ReadBlock(self.__source, self.__buffer_size)
                             if not block:
                                 # EOF. We're done
                                 break
@@ -581,12 +578,12 @@ class Splicer:
                                 # Technically, I should be keeping a running total of all
                                 # the chunk sizes
                                 # Worry about it if it ever becomes an issue
-                                if not self._repairing:
+                                if not self.__repairing:
                                     # We've already established that we aren't in repairing mode.
                                     # *Very* strong evidence that this method is *way* too long and complicated
-                                    # Could probably seek to self._bufferSize, relative.
+                                    # Could probably seek to self.__buffer_size, relative.
                                     # But, after an IOError, who knows where tell() is?
-                                    self.__source.seek(count * self._bufferSize)
+                                    self.__source.seek(count * self.__buffer_size)
                                 continue
                             else:
                                 break
@@ -599,16 +596,16 @@ class Splicer:
                     # Honestly, this is another special-case. Don't want to waste time on this
                     # if I'm just trying to repair existing chunks
                     # Set this to something reasonable
-                    bytes = self._bufferSize
+                    bytes = self.__buffer_size
 
                     # Read the destination file.
                     with open(destination_path, "rb") as destination:
-                        block = destination.read(self._bufferSize)
+                        block = destination.read(self.__buffer_size)
                         bytes = len(block)
-                        if self._bufferSize != bytes:
+                        if self.__buffer_size != bytes:
                             finished = True
 
-                    if not self._repairing:
+                    if not self.__repairing:
                         # Again, the distinction between the two
                         self.__source.seek(bytes, 1)
           
