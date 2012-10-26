@@ -39,6 +39,9 @@ class Splicer:
         # Since this is what we almost always want
         self.__repairing = False
 
+        # Should declare the variables that get created here for the sake of pickling.
+        # Wonder if it still works that way?
+        # Oh well. This class should pretty much *never* be pickled
         self.ResetSource()
 
         self.__version = "0.0.2"
@@ -51,6 +54,9 @@ class Splicer:
         # FIXME: Configure the logger to send its output to self.__ui
 
         self.__working_directory = '.'
+
+        # Note that this is Merger-specific
+        self.__chunk_count = None
 
     def Operate(self):
         ''' Effectively, this is main() '''
@@ -73,15 +79,15 @@ class Splicer:
 
     def SourceFileName(self, name=None):
         if name is not None:
-            self._sourceFileName = name
+            self.__source_file_name = name
 
-        return self._sourceFileName
+        return self.__source_file_name
 
     def ResetSource(self):
         ''' Work-around to allow Source to work as both a Getter and Setter '''
         # Try to play unix-nice
         self.__source = sys.stdin
-        self._sourceFileName = "STDIN"
+        self.__source_file_name = "STDIN"
         # Start with a default that kind of makes sense for piping from STDIN
         self.__source_size = sys.maxint
 
@@ -154,7 +160,7 @@ class Splicer:
         # discard the ".details"--really should make the UI simpler. Just go
         # into the folder, run splice.py -m, and it finds the .details file and
         # merges everything.  TODO: do that soon
-        source_root_name = self._sourceFileName[:-8]
+        source_root_name = self.__source_file_name[:-8]
 
         # Cheese-ball work-around for windows:
         if source_root_name[:2] == ".\\":
@@ -187,35 +193,31 @@ class Splicer:
 
         return files_to_merge
 
-    def _Merge(self):
-        ''' Restore a splice to a single file '''
-
-        # FIXME: Break this into multiple methods. Maybe even its own class
-
+    def __LoadDetails(self):
         # Suppose I could pipe the details from STDIN, but it just doesn't seem to
         # make any sense.  But what about sending them to STDOUT?
-        if not self._sourceFileName:
+        if not self.__source_file_name:
             # No, this error message isn't very helpful
             raise NotImplementedError("Implement looking for a .details file in the pwd")
 
-        self.__logger.debug("Pulling details out of the directory file '" + self._sourceFileName + "'")
+        self.__logger.debug("Pulling details out of the directory file '" + self.__source_file_name + "'")
 
         # the files that might be interesting
         list_of_file_names = os.listdir(self.__working_directory)
 
-        details_file_name = os.path.join(self.__working_directory, self._sourceFileName)
+        details_file_name = os.path.join(self.__working_directory, self.__source_file_name)
         with open(details_file_name, "r") as details_file:
             # FIXME: This really should be a YAML file
             # Version:
-            version = details_file.readline().split(' ')[1].strip()
+            self.__version = details_file.readline().split(' ')[1].strip()
 
             # Chunk Count:
-            chunk_count = int(details_file.readline().split(' ')[2].strip())
+            self.__chunk_count = int(details_file.readline().split(' ')[2].strip())
 
             # stash this for later
             expected_checksum = details_file.readline().split(' ')[1].strip()
 
-            if version == '0.0.1':
+            if self.__version == '0.0.1':
                 # This really isn't justified. The -b parameter was available then. I just
                 # don't recall it ever being used. Does this actually matter on the
                 # merge? I'm just reading 'destination' files until the end, then merging
@@ -223,10 +225,30 @@ class Splicer:
                 # Actually, that's a *really* important detail for dealing with trying to
                 # work around bad sectors
                 self.__buffer_size = 1024
-            elif version == '0.0.2':
+            elif self.__version == '0.0.2':
                 self.__buffer_size = int(details_file.readline().split(' ')[1].strip())
 
-        digest = self.__PickDigest(version)
+    def Validate(self):
+        # Copy/pasted from _Merge. Smells!
+        list_of_file_names = os.listdir(self.__working_directory)
+        source_root_name = self.__PickSourceRootName()
+
+        files_to_merge = self.__Chunks(list_of_file_names, source_root_name)
+        return len(files_to_merge) == self.__chunk_count
+
+    def _Merge(self):
+        ''' Restore a splice to a single file '''
+
+        # FIXME: Break this into multiple methods. Maybe even its own class
+
+        self.__LoadDetails()
+
+        # Here's where the entire tangled mess starts collapsing.
+        # __LoadDetails loads a version.
+        # That value is *vastly* different than what's really meant by the splitter.
+        # *Very* strong incentive to split these into multiple classes.
+        # Especially since the splitters really should have one class per version
+        digest = self.__PickDigest(self.__version)
 
         # *really* tempting to just use magic strings everywhere for version numbers
         # Are they really any less confusing than trying to deal with a variable?
@@ -235,13 +257,12 @@ class Splicer:
         # Though I just realized that I've committed a fairly major sin by breaking
         # the interface between 0.0.1 and 0.0.2. Oh, well. It isn't like anyone but
         # me has ever seen this code yet
-        if version == self.__version or version == '0.0.1':
+        if self.__version == '0.0.1' or self.__version == '0.0.2':
             self.__logger.debug("Have a version '" + version + "' splice that I can handle")
 
             source_root_name = self.__PickSourceRootName()
 
-            files_to_merge = self.__Chunks(list_of_file_names, source_root_name)
-            if len(files_to_merge) == chunk_count:
+            if self.Validate():
                 self.__logger.debug("Merging " + str(chunk_count) + " chunks into '" + source_root_name + "'")
                 # OK, we can at least try to merge the pieces
                 files_to_merge.sort() # Seems reasonable to require them to be in alphabetical order
@@ -254,8 +275,8 @@ class Splicer:
                         file_path = os.path.join(self.__working_directory, file_name)
                         #self.__logger.info("# " + file_path)
 
-                        # Note the major distinction here between source and self._source (much
-                        # less self.__source). Much ugliness has entered this code!
+                        # Note the major distinction here between source and self.__source.
+                        # Much ugliness has entered this code!
                         with open(file_path, "rb") as source:
                             while True:
                                 bytes = source.read()
@@ -281,11 +302,11 @@ class Splicer:
         ''' Caller is responsible for closing '''
         raise myexceptions.ObsoleteMethod("Splicer should not be doing this")
 
-        if not self._sourceFileName:
-            self._sourceFileName = 'STDIN'
+        if not self.__source_file_name:
+            self.__source_file_name = 'STDIN'
             source = sys.stdin
         else:
-            source = open(self._sourceFileName, "rb")
+            source = open(self.__source_file_name, "rb")
 
         # i.e. Go to end
         source.seek(0, 2)
@@ -296,7 +317,7 @@ class Splicer:
         return source
 
     def __PickBaseName(self):
-        return os.path.split(self._sourceFileName)[1]
+        return os.path.split(self.__source_file_name)[1]
     
     def __CreateDirectory(self, destination_directory):
         # Note that trying to recreate an existing directory will raise
@@ -315,13 +336,6 @@ class Splicer:
             self.__logger.error("Destination directory already exists")
             raise
         
-    def __CloseIfSafe(self, source):
-        raise myexceptions.ObsoleteMethod("Let the caller deal with this...or not")
-
-        if self._sourceFileName != 'STDIN':
-            # Shouldn't hurt to call this on an object that's already closed
-            source.close()
-
     def __PickChunkDigits(self, memo=[]):
         ''' How many digits do we need to account for all the chunks? '''
         # Since there really isn't anything we can do with this that isn't
@@ -624,19 +638,6 @@ class Splicer:
             # FIXME: Make this go away. It's only here currently to make the change
             # more obvious in source control history
             #self.__CloseIfSafe(self.__source)
-
-    def Dispose(self):
-        # Especially with that whole "Just swallow exceptions without question" attitude
-        raise ObsoleteMethod("Caller needs to deal with this.")
-
-        # Just a sanity check, really
-        try:
-            # Eww...*this* smells!
-            self._source.close()
-        except:
-            # All kinds of things could go wrong here. Maybe document them later, if
-            # they start biting me
-            pass
 
 if __name__ == '__main__':
     logging.error ("Use some sort of UI layer, such as Program or the REPL")

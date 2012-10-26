@@ -5,8 +5,6 @@ import io
 
 import splice, ui
 
-splice.SwitchToDebug()
-
 class TestStreamSplicing(unittest.TestCase):
     buffer = """The quick red fox jumped over the lazy brown dog.
 Now is the time for all good men to come to the aid of their country.
@@ -19,7 +17,7 @@ being obnoxious about that entire thing."""
     ##############################################################
     # Tests
     ##############################################################
-
+    """
     def test_Nothing(self):
         ''' Just make sure the bare-bones basics work '''
         pass
@@ -42,9 +40,48 @@ being obnoxious about that entire thing."""
         self.assertEqual(sys.stdin, self.__splicer.Source())
         self.assertEqual("STDIN", self.__splicer.SourceFileName())
 
+    def test_Repair(self):
+        ''' Build a splice, make sure it's incomplete, then try to repair it '''
+        raise NotImplementedError("This is vital!")
+    """
+    def test_ValidateSlice(self):
+        # Switch to non-debug mode
+        self.tearDown()
+        # Because tearDown() closes the old buffer
+        self.__buffer = io.BytesIO(self.buffer)
+        self.__BuildTestSplice()
+
+        merger = splice.Splicer(ui.DoesNothing())
+        merger.WorkingDirectory(self.__splicer.DestinationDirectory())
+        merger.SourceFileName(self.__splicer.SourceFileName() + ".details")
+        # Actually, if this fails, you probably have hardware issues
+        # Except for the fact that it's so freaking flaky to get this set up.
+        # This part of the interaction is horribly brittle
+        self.assertTrue(self.__splicer.Validate())
+
+        dst = self.__splicer.DestinationDirectory()
+        files = os.listdir(dst)
+        found_chunk = False
+        for f in files:
+            ext = f[-5:]
+            if ext == 'chunk':
+                found_chunk = True
+                os.remove(f)
+                break
+        self.assertTrue(found_chunk)
+
+        self.assertFalse(self.__splicer.Validate())
+
     ##############################################################
     # Boiler Plate
     ##############################################################
+
+    def __BuildTestSplice(self):
+        self.__splicer = splice.Splicer(ui.DoesNothing())
+        # Just to give it something vaguely interesting to work with
+        self.__splicer.BufferSize(len(self.buffer)/15)
+        self.__splicer.SourceFileName("quetzalcoatl.testing")
+        self.__splicer.Source(self.__buffer)
 
     def setUp(self):
         # This really indicates that I need a TestSuite. Or, at least,
@@ -53,19 +90,18 @@ being obnoxious about that entire thing."""
         # (Though, honestly, I shouldn't be)
         self.__buffer = io.BytesIO(self.buffer)
 
-        #self.__splicer = splice.Splicer(self.__ui)
-        self.__splicer = splice.Splicer(ui.DoesNothing())
-        # Just to give it something vaguely interesting to work with
-        self.__splicer.BufferSize(len(self.buffer)/15)
-        self.__splicer.SourceFileName("quetzalcoatl.testing")
-        self.__splicer.Source(self.__buffer)
+        splice.SwitchToDebug()
+
+        self.__BuildTestSplice()
 
     def tearDown(self):
+        splice.SwitchToDebug(False)
+
         dst = self.__splicer.DestinationDirectory()
         if os.path.exists(dst):
             shutil.rmtree(dst)
 
-        # Totally redundant, since it's just a memory buffer and __splicer.Dispose will handle this
+        del self.__splicer
         self.__buffer.close()
 
 if __name__ == '__main__':
